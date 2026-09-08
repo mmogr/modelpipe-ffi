@@ -1,6 +1,8 @@
 .DEFAULT_GOAL := help
 .PHONY: help build check clean fmt fmt-check lint test doc doc-check lock-check \
-        enforce slices swift xcframework xcframework-fast spike checksum dev pre-commit ci
+        enforce surface binding-check slices swift xcframework xcframework-fast spike \
+        checksum dev \
+        pre-commit ci
 
 # Resolve cargo through rustup's shim explicitly, so a standalone toolchain
 # installed by Homebrew cannot silently win over rust-toolchain.toml. Carried
@@ -48,11 +50,26 @@ enforce: ## The architecture gates (no toolchain needed)
 	@./scripts/check_no_credentials.sh
 	@./scripts/check_workflow_yaml.sh
 
+binding-check: swift ## Fail if the committed Swift binding is stale
+	@git diff --exit-code -- Sources/Modelpipe/ && \
+		echo "binding: the committed Swift matches the library" || { \
+		echo ""; \
+		echo "error: Sources/Modelpipe/modelpipe_ffi.swift is not what the library"; \
+		echo "       generates. The binding and the .a it ships beside must agree —"; \
+		echo "       UniFFI checks their API checksums at runtime and calls"; \
+		echo "       fatalError() when they do not, on a device, at the first dial."; \
+		echo "       Commit the diff above."; \
+		exit 1; }
+
+surface: swift ## Fail if the smoke test does not exercise every exported member
+	@./scripts/check-swift-surface.sh
+
 swift: ## Generate the Swift binding from the built library
 	$(CARGO) build --lib
 	$(CARGO) run --bin uniffi-bindgen -- generate \
 		--library target/debug/libmodelpipe_ffi$(shell uname -s | grep -q Darwin && echo .dylib || echo .so) \
-		--language swift --out-dir generated
+		--language swift --no-format --out-dir build/generated-staging
+	@cp build/generated-staging/modelpipe_ffi.swift Sources/Modelpipe/
 
 xcframework: ## Build the XCFramework, optimised (macOS only; needs Xcode)
 	@PROFILE=release ./scripts/build-xcframework.sh
@@ -83,6 +100,6 @@ dev: fmt lint test ## Format, lint, test
 # before pushing. `xcframework` is deliberately not in here: it needs Xcode,
 # and a target that fails on Linux for a reason that is not the contributor's
 # fault teaches people to ignore the target.
-pre-commit: fmt-check lint check test doc-check lock-check enforce ## Everything CI checks on Linux
+pre-commit: fmt-check lint check test doc-check lock-check enforce surface binding-check ## Everything CI checks on Linux
 
 ci: pre-commit ## Alias for pre-commit

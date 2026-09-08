@@ -77,7 +77,11 @@ final class Spike: ObservableObject {
             status = "\(opened.status())"
             watch(opened, from: t0)
         } catch let error as MpError {
-            log("refused: \(error.localizedDescription)")
+            // `message()`, not `localizedDescription`. UniFFI generates the
+            // latter as `String(reflecting: self)`, so it renders the enum
+            // case and its payload rather than the sentence written to be
+            // read.
+            log("refused: \(error.message())")
             log("retryable: \(error.isRetryable())")
         } catch {
             log("unexpected: \(error)")

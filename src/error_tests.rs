@@ -179,3 +179,38 @@ fn an_os_reason_gets_exactly_one_full_stop() {
         );
     }
 }
+
+/// `message()` is the sentence, and it is the *exported* way to get it.
+///
+/// The method exists because Swift's `localizedDescription` is not it. `UniFFI`
+/// generates `errorDescription` as `String(reflecting: self)`, so the app
+/// would show `modelpipe_ffi.MpError.Bind(reason: "...")` to a person and
+/// nothing would fail. This asserts the Rust half of the difference; the
+/// Swift smoke test asserts the half that crosses the boundary.
+#[test]
+fn message_is_the_sentence_and_not_a_rendering_of_the_variant() {
+    for error in [
+        MpError::from(TicketParseError::Malformed),
+        MpError::Bind {
+            reason: "address in use".to_owned(),
+        },
+        MpError::PeerUnreachable,
+        MpError::Unknown {
+            detail: "something new".to_owned(),
+        },
+    ] {
+        let message = error.message();
+
+        assert_eq!(
+            message,
+            error.to_string(),
+            "message() drifted from Display for {error:?}"
+        );
+        for shape in ["MpError", "modelpipe_ffi", "{", "reason:", "detail:"] {
+            assert!(
+                !message.contains(shape),
+                "{error:?} rendered the variant rather than a sentence: {message:?}"
+            );
+        }
+    }
+}

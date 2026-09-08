@@ -29,68 +29,50 @@ if [[ ! -d "${FRAMEWORK}" ]]; then
     exit 1
 fi
 
-# The generated Swift is an output of the framework build, not a checked-in
-# file, so regenerate rather than assume it is lying around.
-if [[ ! -f "${ROOT_DIR}/generated/modelpipe_ffi.swift" ]]; then
-    echo "error: generated/modelpipe_ffi.swift not found. Run \`make xcframework\` first." >&2
+if [[ ! -f "${ROOT_DIR}/Sources/Modelpipe/modelpipe_ffi.swift" ]]; then
+    echo "error: Sources/Modelpipe/modelpipe_ffi.swift not found. Run \`make swift\` first." >&2
     exit 1
 fi
 
 rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}/Sources/Smoke"
 
-cp "${ROOT_DIR}/generated/modelpipe_ffi.swift" "${WORK_DIR}/Sources/Smoke/"
-
 cat > "${WORK_DIR}/Package.swift" <<'SWIFT'
 // swift-tools-version: 6.2
 import PackageDescription
 
-// Matches the consuming app's settings on the two that matter: Swift 6
-// language mode and complete strict concurrency. Generated code that is not
-// `Sendable`-clean fails here rather than in ggchat.
+// Depends on the repository's OWN manifest rather than restating it.
 //
-// THE LINKER SETTINGS ARE NOT OPTIONAL, AND ggchat WILL NEED THE SAME ONES.
+// This used to be a hand-written copy: a binaryTarget pointing at a framework
+// copied in beside it, the generated Swift copied into this target's sources,
+// and the seven linkerSettings spelled out again in a heredoc. It passed, and
+// it proved the wrong thing. README.md claimed those settings were "executed
+// rather than merely written down" while what CI executed was a duplicate of
+// them — so the real manifest could have been wrong in any way at all and this
+// would still have gone green.
 //
-// A static library does not carry its own dependencies. When rustc links a
-// binary it passes the system frameworks itself; a `.a` handed to someone
-// else records that it *references* those symbols and nothing about where
-// they live. Omit them and the build gets all the way to the last step:
-//
-//     __RNvMs_...system_configuration...SCNetworkInterfaceType13from_cfstring
-//         in libmodelpipe_ffi.a[arm64]
-//     ld: symbol(s) not found for architecture arm64
-//
-// This list is read off rustc's own link invocation for the iOS target, minus
-// the ones SwiftPM already passes (System, c, m).
+// Consuming the package makes the claim literal, and it puts one more thing
+// under test that nothing else here checks: whether SwiftPM propagates a
+// dependency's linkerSettings to the consumer's link. If it does not, this
+// fails at `ld` and the answer arrives as a red build rather than as a
+// discovery in somebody's app.
 let package = Package(
     name: "Smoke",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v26)],
+    dependencies: [.package(path: "../..")],
     targets: [
-        .binaryTarget(name: "ModelpipeFFI", path: "ModelpipeFFI.xcframework"),
         .executableTarget(
             name: "Smoke",
-            dependencies: ["ModelpipeFFI"],
-            linkerSettings: [
-                // iroh's transport: interface enumeration and reachability.
-                .linkedFramework("SystemConfiguration"),
-                // rustls-platform-verifier, via security-framework — the
-                // Apple trust store, which is why there is no bundled CA set.
-                .linkedFramework("Security"),
-                .linkedFramework("Network"),
-                .linkedFramework("CoreFoundation"),
-                .linkedFramework("Foundation"),
-                // objc2's runtime calls, and iconv from the C dependencies.
-                .linkedLibrary("objc"),
-                .linkedLibrary("iconv"),
-            ]
-        ),
+            dependencies: [.product(name: "Modelpipe", package: "modelpipe-ffi")]
+        )
     ],
     swiftLanguageModes: [.v6]
 )
 SWIFT
 
-cat > "${WORK_DIR}/Sources/Smoke/main.swift" <<'SWIFT'
+cat > "${WORK_DIR}/Sources/Smoke/main.swift" <<'SMOKE_SWIFT'
 import Foundation
+import Modelpipe
 
 // modelpipe's normative ticket vector 1. Well-formed, and names an endpoint
 // nothing is listening on — so the dial binds a port and then sits at `idle`,
@@ -103,25 +85,69 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-// 1. A refusal crosses the boundary as a typed Swift error.
+// 1. A refusal crosses the boundary as a typed Swift error, carrying the two
+//    things the app reads off it.
+//
+//    Both are `#[uniffi::export]`ed methods. They were ordinary `pub fn`s on
+//    the Rust type first — documented, and covered by five Rust tests — and
+//    neither crossed the boundary, because a `pub fn` on a type that crosses
+//    the FFI is not part of the FFI. Swift got a bare enum, and
+//    `error.isRetryable()` failed to compile in the spike. This check used to
+//    catch the error and interpolate it, which proved the type crossed and
+//    nothing whatever about its surface.
 do {
     _ = try await mpConnect(ticket: "nope", options: MpConnectOptions())
     fail("a malformed ticket was accepted")
 } catch let error as MpError {
-    print("ok  a bad ticket is refused: \(error)")
+    guard !error.isRetryable() else {
+        fail("a malformed ticket was reported as worth dialling again")
+    }
+
+    // The same contract `every_error_is_a_sentence` holds on the Rust side:
+    // a whole sentence, so a full stop or a closing bracket.
+    let message = error.message()
+    guard !message.isEmpty, message.hasSuffix(".") || message.hasSuffix(")") else {
+        fail("the error message is not a sentence: \(message)")
+    }
+    // The trap: UniFFI generates `errorDescription` for every error enum as
+    // `String(reflecting: self)`, so `localizedDescription` yields
+    // `modelpipe_ffi.MpError.BadTicket(reason: "...")`. That compiles, reads
+    // like a message, and shows somebody the inside of the binding. If
+    // `message()` ever becomes that, it fails here rather than on a screen.
+    for shape in ["MpError", "modelpipe_ffi", "reason:"] {
+        guard !message.contains(shape) else {
+            fail("the error message renders the variant, not a sentence: \(message)")
+        }
+    }
+    print("ok  a bad ticket is refused, and not retryable: \(message)")
+    print("    (localizedDescription would have given: \(error.localizedDescription))")
 } catch {
     fail("unexpected error type: \(error)")
 }
 
 // 2. A real dial binds, and the sync accessors return.
+//
+//    Every field is spelled out rather than left to its default. UniFFI emits
+//    the memberwise initialiser in DECLARATION order, so reordering the Rust
+//    record silently reorders the Swift arguments — which has already broken
+//    this build once, on `portMapping` and `discovery`.
 let pipe = try await mpConnect(
     ticket: ticket,
-    options: MpConnectOptions(portMapping: false, discovery: false)
+    options: MpConnectOptions(
+        port: nil,
+        relayUrl: nil,
+        portMapping: false,
+        discovery: false,
+        relayOnly: false
+    )
 )
 
 let base = pipe.baseUrl()
 guard base.hasPrefix("http://127.0.0.1:"), base.hasSuffix("/v1") else {
     fail("base URL is not a loopback /v1 URL: \(base)")
+}
+guard base.contains(":\(pipe.port())/") else {
+    fail("port() disagrees with the base URL: \(pipe.port()) vs \(base)")
 }
 print("ok  bound \(base)")
 
@@ -134,8 +160,14 @@ guard pipe.closeReason() == nil else {
     fail("an open pipe reported a close reason")
 }
 
-_ = pipe.networkMetrics()
-print("ok  metrics read")
+// The rate-limited counter is the one nothing else surfaces: a relay
+// refusing this endpoint and a network silently dropping the traffic look
+// identical from the outside, and the spike's whole diagnosis rests on
+// telling them apart.
+let metrics = pipe.networkMetrics()
+print("ok  metrics read: \(metrics.relayConnections) opened, "
+    + "\(metrics.relayConnectionsFailed) failed, "
+    + "\(metrics.relayConnectionsRatelimited) rate-limited")
 
 // 3. The async path. This is the one that hangs rather than errors if the
 //    library's runtime was never started, so it is the reason this script
@@ -157,12 +189,15 @@ guard next == nil else {
 print("ok  the status sequence ends")
 
 print("smoke: the binding links and answers across the boundary")
-SWIFT
-
-cp -R "${FRAMEWORK}" "${WORK_DIR}/ModelpipeFFI.xcframework"
+SMOKE_SWIFT
 
 echo "==> Building and running the smoke executable"
 cd "${WORK_DIR}"
+
+# Point the dependency's binaryTarget at the framework just built rather than
+# at the last published release, which is the whole point of running this
+# before publishing anything.
+export MODELPIPE_FFI_LOCAL_XCFRAMEWORK=1
 
 # Bounded, and the bound is the point rather than caution.
 #

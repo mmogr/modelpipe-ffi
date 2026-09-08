@@ -24,11 +24,26 @@ publish = false
 # empty one that arrives first and wins the name.
 git_release_enable = false
 
-# Tag on merge, and the shape is not cosmetic: `release.yml` triggers on
-# `v[0-9]+.[0-9]+.[0-9]+`, so a differently-named tag is a release that
+# Tag on merge — but a BUILD tag, not the release tag.
+#
+# release-plz owns the version, the changelog, and the decision to release.
+# What it cannot own is the public tag, because it cannot compute what has to
+# be committed before that tag is created: the XCFramework's checksum, which
+# does not exist until the artifact is built.
+#
+# So merging the release PR pushes `build/vX.Y.Z`, `release.yml` builds the
+# artifact and writes its checksum into Package.swift on main, and only then
+# creates `vX.Y.Z` on that commit. SwiftPM loads a manifest from the file view
+# at the tag it resolves, so the release tag must land on a commit that already
+# carries its own checksum, or the package is one nobody can build.
+#
+# `build/vX.Y.Z` is invisible to SwiftPM: `Version(tag:)` strips at most one
+# leading `v` and cannot parse the rest, so it never appears as a package
+# version. And the shape is still load-bearing — `release.yml` triggers on
+# `build/v[0-9]+.[0-9]+.[0-9]+`, so a differently-named tag is a release that
 # silently never builds.
 git_tag_enable = true
-git_tag_name = "v{{ version }}"
+git_tag_name = "build/v{{ version }}"
 
 changelog_update = true
 changelog_path = "./CHANGELOG.md"

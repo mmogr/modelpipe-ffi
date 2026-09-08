@@ -50,8 +50,9 @@ platform_name() {
 #   $1 the library inside the framework
 #   $2 a human name for the slice
 #   $3 the platform name the slice must carry
+#   $4 the deployment floor this build asked for
 check() {
-    local lib="$1" name="$2" want="$3"
+    local lib="$1" name="$2" want="$3" want_min="$4"
 
     if [[ ! -f "${lib}" ]]; then
         echo "  MISSING  ${name}: ${lib}"
@@ -75,23 +76,64 @@ check() {
     done
     names="${names% }"
 
-    # The deployment target the slice was actually built with. Reported
-    # always, and failed only on the one value known to be broken: rustc's
-    # apple targets default to iOS 10.0, which cannot resolve
-    # `___chkstk_darwin` and so fails to link against a modern SDK's C
-    # objects. Asserting an exact value here would make this gate fail on
-    # any legitimate bump; asserting against the known-bad default cannot.
-    local minos
-    minos="$(otool -l "${lib}" 2>/dev/null \
+    # Deployment floors, read from BOTH load commands.
+    #
+    # A modern object carries LC_BUILD_VERSION, whose floor `otool` prints as
+    # `minos`. An object built for a low enough target carries the older
+    # LC_VERSION_MIN_*, whose floor prints as `version` — a different word for
+    # the same fact. Reading only the first hides the second completely.
+    #
+    # That is not hypothetical, and it is why this reads both. Every slice
+    # contains 390 objects from rustup's PRECOMPILED standard library — core,
+    # alloc, std, addr2line, compiler_builtins' outline-atomics — which the
+    # Rust project built with its own deployment targets and which no
+    # environment variable here can move short of `-Z build-std`. On the
+    # simulator and macOS slices they read 14.0 and 11.0. On the device slice
+    # they read **iOS 10.0**, in the old-style command: the exact value this
+    # gate exists to reject, sitting in the shipped v0.1.0 artifact while this
+    # script reported `minos 26.0` and passed.
+    #
+    # The two are therefore asserted differently. The floor we asked for must
+    # be present — that is our objects, and their absence is precisely what
+    # broke when the deployment target went unset and the link failed on
+    # `___chkstk_darwin`. The toolchain's own floor is reported and not
+    # failed: it is lower rather than higher, a mixed archive is resolved by
+    # the consuming app's target, and it is how every Rust iOS binary is
+    # built.
+    local built toolchain
+    built="$(otool -l "${lib}" 2>/dev/null \
         | awk '/^ *minos /{print $2}' \
         | sort -u \
         | tr '\n' ' ')"
-    minos="${minos% }"
+    built="${built% }"
+    toolchain="$(otool -l "${lib}" 2>/dev/null \
+        | awk '
+            /^ *cmd LC_VERSION_MIN_/ { want = 1; next }
+            /^ *cmd / { want = 0; next }
+            want && /^ *version / { print $2; want = 0 }
+        ' \
+        | sort -u \
+        | tr '\n' ' ')"
+    toolchain="${toolchain% }"
 
-    if [[ "${minos}" == 10.* ]]; then
-        echo "  WRONG    ${name}  [${arches}]  minos ${minos} is rustc's default, not a chosen floor"
-        fail=1
-    fi
+    case " ${built} " in
+        *" ${want_min} "*) ;;
+        *)
+            echo "  WRONG    ${name}  [${arches}]  asked for a floor of ${want_min}, compiled ${built:-nothing}"
+            fail=1
+            ;;
+    esac
+
+    local floor
+    for floor in ${built}; do
+        if [[ "${floor}" == 10.* ]]; then
+            echo "  WRONG    ${name}  [${arches}]  compiled an object at ${floor}, which is rustc's default rather than a chosen floor"
+            fail=1
+        fi
+    done
+
+    local minos="${built}"
+    [[ -n "${toolchain}" ]] && minos="${built} (toolchain: ${toolchain})"
 
     if [[ -z "${names}" ]]; then
         echo "  NO DATA  ${name}  [${arches}]  otool reported no platform load command"
@@ -106,12 +148,18 @@ check() {
 
 echo "Checking slices in ${FRAMEWORK}"
 
+# The floors these must have been built with. Same defaults as
+# build-xcframework.sh, and overridden by the same variables, so running this
+# on its own asserts what the build asked for rather than a second opinion.
+IOS_MIN="${IPHONEOS_DEPLOYMENT_TARGET:-26.0}"
+MACOS_MIN="${MACOSX_DEPLOYMENT_TARGET:-26.0}"
+
 check "${FRAMEWORK}/ios-arm64/libmodelpipe_ffi.a" \
-    "ios-arm64" "IOS"
+    "ios-arm64" "IOS" "${IOS_MIN}"
 check "${FRAMEWORK}/ios-arm64-simulator/libmodelpipe_ffi.a" \
-    "ios-simulator" "IOSSIMULATOR"
+    "ios-simulator" "IOSSIMULATOR" "${IOS_MIN}"
 check "${FRAMEWORK}/macos-arm64/libmodelpipe_ffi.a" \
-    "macos" "MACOS"
+    "macos" "MACOS" "${MACOS_MIN}"
 
 # Every bundle is single-architecture now that the x86_64 targets are gone, so
 # each one is asserted to carry exactly `arm64` and nothing else. A fat slice

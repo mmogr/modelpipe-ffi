@@ -20,7 +20,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 BUILD_DIR="${ROOT_DIR}/build"
-GENERATED_DIR="${ROOT_DIR}/generated"
+STAGING_DIR="${ROOT_DIR}/build/generated-staging"
+# Tracked source, not an output directory. See .gitignore.
+SWIFT_SRC_DIR="${ROOT_DIR}/Sources/Modelpipe"
 FRAMEWORK="${BUILD_DIR}/ModelpipeFFI.xcframework"
 LIB_NAME="libmodelpipe_ffi.a"
 # `PROFILE` is the cargo profile name; the output directory is not always the
@@ -71,10 +73,18 @@ echo "==> Building three slices (profile ${PROFILE})"
 echo "    iOS ${IPHONEOS_DEPLOYMENT_TARGET}, macOS ${MACOSX_DEPLOYMENT_TARGET}"
 # Apple silicon only. The two x86_64 targets were dropped deliberately: they
 # exist for an Intel Mac running the simulator and for an Intel Mac app, and
-# neither is a machine this ships to. Dropping them also removed the one
-# unexplained reading in this build — those slices came out with deployment
-# floors of 14.0 and 11.0 rather than the 26.0 set below, which applied only
-# to the arm64 targets.
+# neither is a machine this ships to.
+#
+# It did NOT retire the mixed deployment floors, which an earlier version of
+# this comment claimed it would. Those readings survived the change intact —
+# 14.0 on the simulator slice, 11.0 on macOS, iOS 10.0 on the device — because
+# they were never about Intel. They are rustup's PRECOMPILED standard library:
+# 390 objects per slice, the same count in all three, built by the Rust
+# project against its own deployment targets and unmovable from here short of
+# `-Z build-std`. Everything cargo actually compiles — this crate, every
+# dependency, and the C and assembly from ring and blake3 — takes the targets
+# set above, and does so on all three slices. check-slices.sh reads both load
+# commands and asserts the two separately.
 #
 # The consumer has to agree: ggchat's Release configuration leaves
 # ONLY_ACTIVE_ARCH at its default NO, so Xcode asks for every standard
@@ -120,21 +130,34 @@ echo "==> Generating the Swift binding and its headers"
 # is the one `uniffi-bindgen` can always load. Pointing this at the iOS dylib
 # instead makes the generator's ability to parse a foreign-platform binary a
 # load-bearing assumption, for no benefit.
-rm -rf "${GENERATED_DIR}"
-mkdir -p "${GENERATED_DIR}"
+# Generated into a scratch directory and copied over, rather than written
+# straight to its destination. `Sources/Modelpipe/` holds tracked source now, so
+# a generate that fails halfway must not be able to leave it truncated or
+# missing.
+rm -rf "${STAGING_DIR}"
+mkdir -p "${STAGING_DIR}" "${SWIFT_SRC_DIR}"
 cargo build --lib --profile "${PROFILE}"
+# `--no-format` because the bytes must not depend on the machine. uniffi shells
+# out to `xcrun swift-format` and only warns when every formatter is missing,
+# so this file comes out one way on a Mac and another on Linux — invisible
+# while `generated/` was ignored, and a permanently red diff gate the moment it
+# is committed. Formatting a generated file buys nothing anyway.
 cargo run --bin uniffi-bindgen -- generate \
     --library "target/${PROFILE_DIR}/libmodelpipe_ffi.dylib" \
     --language swift \
-    --out-dir "${GENERATED_DIR}"
+    --no-format \
+    --out-dir "${STAGING_DIR}"
+
+# Only now that the generate has succeeded.
+cp "${STAGING_DIR}/modelpipe_ffi.swift" "${SWIFT_SRC_DIR}/"
 
 # Xcode wants the modulemap under this exact name, and wants the header
 # alongside it. UniFFI emits `<name>FFI.modulemap`; renaming is the whole of
 # the adaptation.
 HEADERS_DIR="${BUILD_DIR}/headers"
 mkdir -p "${HEADERS_DIR}"
-cp "${GENERATED_DIR}"/*.h "${HEADERS_DIR}/"
-cp "${GENERATED_DIR}"/*.modulemap "${HEADERS_DIR}/module.modulemap"
+cp "${STAGING_DIR}"/*.h "${HEADERS_DIR}/"
+cp "${STAGING_DIR}"/*.modulemap "${HEADERS_DIR}/module.modulemap"
 
 echo "==> Assembling the XCFramework"
 rm -rf "${FRAMEWORK}"
