@@ -76,10 +76,26 @@ TARGETS=(
     aarch64-apple-darwin
     x86_64-apple-darwin
 )
-for target in "${TARGETS[@]}"; do
-    echo "    ${target}"
-    cargo build --lib --profile "${PROFILE}" --target "${target}"
-done
+# One cargo invocation with five `--target` flags, not five invocations.
+#
+# Sequential invocations are not merely tidier-looking; they are slower for a
+# specific reason. Each target's build graph has a long narrow tail — the
+# final few crates, then the link — where the dependency graph has collapsed
+# to one or two units and most cores sit idle. Five builds in a row means
+# paying that tail five times. One build plan spanning all five lets cargo
+# start the next target's wide base while the previous one's tail finishes,
+# so the idle cores get filled.
+#
+# It cannot be done by backgrounding five `cargo build` calls: cargo takes an
+# exclusive lock on the target directory, so concurrent invocations block on
+# each other and the result is the sequential version plus lock contention.
+# Multiple `--target` flags in ONE invocation is the supported way, stable
+# since 1.64.
+#
+# Output paths are unchanged — each target still lands in
+# `target/<triple>/<profile>/`.
+printf '    %s\n' "${TARGETS[@]}"
+cargo build --lib --profile "${PROFILE}" "${TARGETS[@]/#/--target=}"
 
 echo "==> Fattening the two multi-architecture slices"
 rm -rf "${BUILD_DIR}"
