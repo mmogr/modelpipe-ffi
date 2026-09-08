@@ -39,8 +39,25 @@ team** is enough — 7-day builds, no paid Apple Developer Program.
 make spike
 ```
 
-Then in Xcode: select your device, set the signing team on the target if
-`DEVELOPMENT_TEAM` in `project.yml` is still empty, and run.
+Then in Xcode: pick your **iPhone** as the destination — not a simulator, which
+sits on the Mac's network with the Mac's entitlements and so answers none of
+the four questions above — and set the signing team on the target if
+`DEVELOPMENT_TEAM` in `project.yml` is still empty.
+
+### Developer Mode, which iOS will not offer until you need it
+
+iOS 16 and later refuse to launch a development-signed build until Developer
+Mode is on, and **the setting does not appear until an install has been
+refused**. So the order is not the obvious one:
+
+1. Run from Xcode with the phone selected. It fails. That is the step.
+2. On the phone: **Settings → Privacy & Security → Developer Mode**, on.
+3. The phone restarts. This is required, not a suggestion.
+4. Unlock, confirm **Turn On**.
+5. Run again. Then trust the certificate:
+   **Settings → General → VPN & Device Management → your Apple ID → Trust**.
+
+A free personal Apple ID team gets you a 7-day build, which is all this needs.
 
 On the desktop:
 
