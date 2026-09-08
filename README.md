@@ -236,6 +236,12 @@ Nothing is published to crates.io. The product here is a binary, so
 
 Two things worth knowing:
 
+- **A tag whose release already exists stops the workflow.** The build is not
+  byte-reproducible, so a second run of a version would compute a different
+  checksum, pin it, and only then find the release there — and SwiftPM refuses
+  a version whose checksum ever changes. The guard is also what made
+  `build/v0.1.0` safe to create as release-plz's baseline; see
+  `release-plz.toml` for why that was needed.
 - **`release.yml` commits to `main`.** One commit per release, pinning the
   checksum, authored as the repository owner. It needs the ruleset protecting
   `main` to allow a repository-admin bypass, because `RELEASE_PAT` authenticates

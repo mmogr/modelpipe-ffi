@@ -43,6 +43,8 @@ jobs:
   verify:
     name: Verify
     runs-on: ubuntu-latest
+    outputs:
+      already_released: ${{ steps.existing.outputs.already_released }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,6 +62,33 @@ jobs:
             exit 1
           fi
           echo "tag is on main"
+
+      # A build tag whose release already exists must not rebuild anything.
+      #
+      # The build is not byte-reproducible, so a second run would compute a
+      # DIFFERENT checksum for the same version, pin that onto main, and only
+      # then discover the release was already there — leaving main naming a
+      # published zip with a checksum that matches nothing. SwiftPM refuses a
+      # version whose checksum changed anyway (it reads it as a security
+      # risk), so there is no recovering it in place either.
+      #
+      # This is also what makes `build/v0.1.0` safe to create as the baseline
+      # release-plz needs in its own tag namespace: the tag fires this
+      # workflow, and this stops it here.
+      - name: Stop if this version is already released
+        id: existing
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#build/v}"
+          if gh release view "v${version}" >/dev/null 2>&1; then
+            echo "already_released=true" >> "${GITHUB_OUTPUT}"
+            echo "::notice::v${version} is already released; nothing to do."
+          else
+            echo "already_released=false" >> "${GITHUB_OUTPUT}"
+            echo "v${version} is not released yet"
+          fi
 
       - name: Install Rust toolchain
         run: rustup show
@@ -114,6 +143,7 @@ jobs:
     name: Build the XCFramework
     runs-on: macos-26
     needs: [verify]
+    if: needs.verify.outputs.already_released != 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
