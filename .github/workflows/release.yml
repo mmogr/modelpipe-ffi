@@ -43,6 +43,8 @@ jobs:
   verify:
     name: Verify
     runs-on: ubuntu-latest
+    # Nothing here is slow; this is a stall guard, not a budget.
+    timeout-minutes: 20
     outputs:
       already_released: ${{ steps.existing.outputs.already_released }}
     steps:
@@ -142,6 +144,10 @@ jobs:
   build:
     name: Build the XCFramework
     runs-on: macos-26
+    # A cold build of three slices is ~23 minutes — 22m49s on the v0.1.2 run,
+    # where the cargo cache missed — so this is about 2.5x the worst observed
+    # run. It exists because the default is six hours.
+    timeout-minutes: 60
     needs: [verify]
     if: needs.verify.outputs.already_released != 'true'
     steps:
@@ -291,6 +297,13 @@ jobs:
       # Everything upstream tests the repository. This tests the release.
       - name: A consumer can actually resolve it
         if: github.event_name == 'push'
+        # SwiftPM puts no timeout on a binary-artifact download, so a stalled
+        # connection here hangs until the job's own limit. On 2026-09-08 that
+        # wedged the v0.1.2 run for 70 minutes on a 210 MB fetch that takes
+        # about 30 seconds, with no output after `Downloading binary artifact`.
+        # The release was already published by then, so the run could neither
+        # finish nor be usefully re-run. Ten minutes is ~20x the healthy time.
+        timeout-minutes: 10
         run: |
           version="${GITHUB_REF_NAME#build/v}"
           gate="$(mktemp -d)"
