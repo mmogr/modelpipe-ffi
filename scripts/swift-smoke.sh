@@ -163,4 +163,35 @@ cp -R "${FRAMEWORK}" "${WORK_DIR}/ModelpipeFFI.xcframework"
 
 echo "==> Building and running the smoke executable"
 cd "${WORK_DIR}"
+
+# Bounded, and the bound is the point rather than caution.
+#
+# Every check below is either immediate or fails fast; nothing here waits on a
+# network. So the one way this runs long is the failure the script exists to
+# find — an async call that never returns because the library's tokio runtime
+# was never started. Left unbounded that is indistinguishable from a slow
+# runner until the job hits its own ceiling with no clue why.
+#
+# `timeout` exits 124 on expiry, which is caught here so the log names the
+# behaviour instead of leaving a bare non-zero to interpret. The last `ok`
+# line printed before this says which call hung.
+#
+# Not available as `timeout` on macOS without coreutils, so fall back to
+# running unbounded rather than failing a build over a missing tool — the job
+# ceiling still catches it.
+if command -v timeout >/dev/null 2>&1; then
+    if timeout 300 swift run Smoke; then
+        exit 0
+    fi
+    status=$?
+    if [[ "${status}" -eq 124 ]]; then
+        echo "error: the smoke executable did not finish within 300s." >&2
+        echo "       Nothing here waits on a network, so this is a call that" >&2
+        echo "       never returned. The last 'ok' line above names the one" >&2
+        echo "       before it." >&2
+    fi
+    exit "${status}"
+fi
+
+echo "note: no \`timeout\` on this machine; the job ceiling is the only bound."
 swift run Smoke

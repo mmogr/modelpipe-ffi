@@ -103,19 +103,26 @@ make xcframework   # the five slices and the framework (macOS, needs Xcode)
 make checksum      # zip it and print the SwiftPM checksum
 ```
 
-`make xcframework` produces three bundles covering five slices:
+`make xcframework` produces three bundles, one architecture each:
 
-| Bundle | Architectures |
+| Bundle | Architecture |
 |---|---|
 | `ios-arm64` | iPhone |
-| `ios-arm64_x86_64-simulator` | Simulator on Apple silicon and Intel |
-| `macos-arm64_x86_64` | The Mac app |
+| `ios-arm64-simulator` | Simulator on Apple silicon |
+| `macos-arm64` | The Mac app |
+
+**Apple silicon only.** The two x86_64 targets were dropped deliberately —
+they serve an Intel Mac running the simulator and an Intel Mac app, neither of
+which this ships to. A consumer must agree: Xcode's Release configuration
+leaves `ONLY_ACTIVE_ARCH` at its default `NO` and so asks for every standard
+architecture unless `ARCHS` says otherwise.
 
 Every build then asserts each slice carries the platform load command it
-claims (`scripts/check-slices.sh`). That check exists because a cross-compile
-which silently produces host objects succeeds everywhere else and fails at
-link time in the consuming app, days later and to someone who did not build
-it.
+claims, a deployment floor that is not rustc's broken default, and exactly one
+architecture (`scripts/check-slices.sh`). Those checks exist because a
+cross-compile which silently produces host objects succeeds everywhere else
+and fails at link time in the consuming app, days later and to someone who did
+not build it.
 
 ## Consuming it
 

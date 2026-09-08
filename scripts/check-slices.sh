@@ -108,19 +108,25 @@ echo "Checking slices in ${FRAMEWORK}"
 
 check "${FRAMEWORK}/ios-arm64/libmodelpipe_ffi.a" \
     "ios-arm64" "IOS"
-check "${FRAMEWORK}/ios-arm64_x86_64-simulator/libmodelpipe_ffi.a" \
+check "${FRAMEWORK}/ios-arm64-simulator/libmodelpipe_ffi.a" \
     "ios-simulator" "IOSSIMULATOR"
-check "${FRAMEWORK}/macos-arm64_x86_64/libmodelpipe_ffi.a" \
+check "${FRAMEWORK}/macos-arm64/libmodelpipe_ffi.a" \
     "macos" "MACOS"
 
-# The device slice is the one a mistake is most expensive in, so its
-# architecture is asserted too: an arm64e or x86_64 device slice would install
-# and then fail to launch.
-device="${FRAMEWORK}/ios-arm64/libmodelpipe_ffi.a"
-if [[ -f "${device}" ]] && [[ "$(lipo -archs "${device}")" != "arm64" ]]; then
-    echo "  WRONG    ios-arm64 carries $(lipo -archs "${device}"), wanted exactly arm64"
-    fail=1
-fi
+# Every bundle is single-architecture now that the x86_64 targets are gone, so
+# each one is asserted to carry exactly `arm64` and nothing else. A fat slice
+# reappearing here means a target crept back into the build without the
+# framework layout being updated to match — which `-create-xcframework` would
+# accept silently, renaming the bundle underneath the checks above.
+for slice in ios-arm64 ios-arm64-simulator macos-arm64; do
+    lib="${FRAMEWORK}/${slice}/libmodelpipe_ffi.a"
+    [[ -f "${lib}" ]] || continue
+    archs="$(lipo -archs "${lib}")"
+    if [[ "${archs}" != "arm64" ]]; then
+        echo "  WRONG    ${slice} carries '${archs}', wanted exactly arm64"
+        fail=1
+    fi
+done
 
 if [[ "${fail}" -ne 0 ]]; then
     echo

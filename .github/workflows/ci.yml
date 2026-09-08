@@ -122,6 +122,13 @@ jobs:
   apple:
     name: Apple build and Swift smoke
     runs-on: macos-26
+    # The smoke test's whole subject is a call that HANGS rather than errors —
+    # an async method whose runtime was never started. Without a ceiling here,
+    # detecting that would mean a job running to GitHub's six-hour default on a
+    # runner billed at ten times the Linux rate. A cold three-slice build plus
+    # the Swift package is comfortably under twenty; thirty leaves room for a
+    # slow runner without leaving room for a hang.
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

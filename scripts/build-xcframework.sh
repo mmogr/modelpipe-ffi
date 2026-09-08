@@ -2,15 +2,15 @@
 #
 # Build the XCFramework ggchat consumes.
 #
-# Five slices in three bundles, because that is what Apple's packaging can
-# express: a device library, a simulator library fat across two architectures,
-# and a macOS library fat across two more. A single `lipo` of device and
-# simulator arm64 is not a thing — same architecture, different platform, and
-# `lipo` has no way to say so. The XCFramework is the format that does.
+# Three bundles, one architecture each, because that is what Apple's packaging
+# needs to express. A single `lipo` of device and simulator arm64 is not a
+# thing — same architecture, different platform, and `lipo` has no way to say
+# so. The XCFramework is the format that does, which is why it exists here
+# even now that no bundle is fat.
 #
-#   ios-arm64                     iPhone, the one that matters
-#   ios-arm64_x86_64-simulator    Simulator on Apple silicon and on Intel
-#   macos-arm64_x86_64            The Mac app
+#   ios-arm64              iPhone, the one that matters
+#   ios-arm64-simulator    Simulator on Apple silicon
+#   macos-arm64            The Mac app
 #
 # Everything here needs Xcode, so it runs on macOS only. CI runs it on
 # macos-26; there is no Linux path and no attempt at one.
@@ -67,26 +67,34 @@ fi
 export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-26.0}"
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-26.0}"
 
-echo "==> Building five slices (profile ${PROFILE})"
+echo "==> Building three slices (profile ${PROFILE})"
 echo "    iOS ${IPHONEOS_DEPLOYMENT_TARGET}, macOS ${MACOSX_DEPLOYMENT_TARGET}"
+# Apple silicon only. The two x86_64 targets were dropped deliberately: they
+# exist for an Intel Mac running the simulator and for an Intel Mac app, and
+# neither is a machine this ships to. Dropping them also removed the one
+# unexplained reading in this build — those slices came out with deployment
+# floors of 14.0 and 11.0 rather than the 26.0 set below, which applied only
+# to the arm64 targets.
+#
+# The consumer has to agree: ggchat's Release configuration leaves
+# ONLY_ACTIVE_ARCH at its default NO, so Xcode asks for every standard
+# architecture unless told otherwise. Its project.yml sets ARCHS to match.
 TARGETS=(
     aarch64-apple-ios
     aarch64-apple-ios-sim
-    x86_64-apple-ios
     aarch64-apple-darwin
-    x86_64-apple-darwin
 )
-# One cargo invocation with five `--target` flags, not five invocations.
+# One cargo invocation with three `--target` flags, not three invocations.
 #
 # Sequential invocations are not merely tidier-looking; they are slower for a
 # specific reason. Each target's build graph has a long narrow tail — the
 # final few crates, then the link — where the dependency graph has collapsed
-# to one or two units and most cores sit idle. Five builds in a row means
-# paying that tail five times. One build plan spanning all five lets cargo
+# to one or two units and most cores sit idle. Three builds in a row means
+# paying that tail three times. One build plan spanning all three lets cargo
 # start the next target's wide base while the previous one's tail finishes,
 # so the idle cores get filled.
 #
-# It cannot be done by backgrounding five `cargo build` calls: cargo takes an
+# It cannot be done by backgrounding three `cargo build` calls: cargo takes an
 # exclusive lock on the target directory, so concurrent invocations block on
 # each other and the result is the sequential version plus lock contention.
 # Multiple `--target` flags in ONE invocation is the supported way, stable
@@ -97,19 +105,11 @@ TARGETS=(
 printf '    %s\n' "${TARGETS[@]}"
 cargo build --lib --profile "${PROFILE}" "${TARGETS[@]/#/--target=}"
 
-echo "==> Fattening the two multi-architecture slices"
+# No `lipo` step. With one architecture per bundle there is nothing to fatten,
+# so each slice is handed to `-create-xcframework` straight out of its target
+# directory.
 rm -rf "${BUILD_DIR}"
-mkdir -p "${BUILD_DIR}/ios-sim" "${BUILD_DIR}/macos"
-
-lipo -create \
-    "target/aarch64-apple-ios-sim/${PROFILE_DIR}/${LIB_NAME}" \
-    "target/x86_64-apple-ios/${PROFILE_DIR}/${LIB_NAME}" \
-    -output "${BUILD_DIR}/ios-sim/${LIB_NAME}"
-
-lipo -create \
-    "target/aarch64-apple-darwin/${PROFILE_DIR}/${LIB_NAME}" \
-    "target/x86_64-apple-darwin/${PROFILE_DIR}/${LIB_NAME}" \
-    -output "${BUILD_DIR}/macos/${LIB_NAME}"
+mkdir -p "${BUILD_DIR}"
 
 echo "==> Generating the Swift binding and its headers"
 # Read out of a built library rather than a UDL file: the scaffolding compiled
@@ -140,8 +140,8 @@ echo "==> Assembling the XCFramework"
 rm -rf "${FRAMEWORK}"
 xcodebuild -create-xcframework \
     -library "target/aarch64-apple-ios/${PROFILE_DIR}/${LIB_NAME}" -headers "${HEADERS_DIR}" \
-    -library "${BUILD_DIR}/ios-sim/${LIB_NAME}" -headers "${HEADERS_DIR}" \
-    -library "${BUILD_DIR}/macos/${LIB_NAME}" -headers "${HEADERS_DIR}" \
+    -library "target/aarch64-apple-ios-sim/${PROFILE_DIR}/${LIB_NAME}" -headers "${HEADERS_DIR}" \
+    -library "target/aarch64-apple-darwin/${PROFILE_DIR}/${LIB_NAME}" -headers "${HEADERS_DIR}" \
     -output "${FRAMEWORK}"
 
 echo "==> Checking each slice is what it claims to be"
