@@ -119,8 +119,8 @@ jobs:
       - name: Private docs
         run: cargo doc --no-deps --document-private-items
 
-  apple-build:
-    name: Apple build (five slices)
+  apple:
+    name: Apple build and Swift smoke
     runs-on: macos-26
     steps:
       - name: Checkout repository
@@ -132,53 +132,42 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      # Builds all five slices, generates the Swift, assembles the framework,
-      # and then asserts each slice carries the platform load command it
-      # claims. That last step is the one that matters: a cross-compile which
-      # silently produced host objects succeeds everywhere else and fails at
-      # link time in the consuming app, days later.
+      # Builds every slice, generates the Swift, assembles the framework, and
+      # asserts each slice carries the platform load command and deployment
+      # floor it claims. That last part is the one that matters: a
+      # cross-compile which silently produced host objects succeeds everywhere
+      # else and fails at link time in the consuming app, days later.
+      #
       # Unoptimised on purpose. This job answers "does it cross-compile,
-      # assemble, and carry the right platform load commands" — none of which
-      # optimisation changes. Five release builds of iroh with thin LTO, on a
-      # runner billed at ten times the Linux rate, is not a per-commit cost
-      # worth paying for an answer that is the same either way. The release
-      # workflow builds the optimised one, where it belongs.
+      # assemble, link and answer" — none of which optimisation changes — and
+      # five release builds of iroh with thin LTO on a runner billed at ten
+      # times the Linux rate is not a per-commit cost worth paying. It also
+      # catches strictly more: the iOS deployment-target bug was invisible in
+      # release, where optimisation drops the NEON path that referenced the
+      # missing symbol.
       - name: Build the XCFramework
         run: make xcframework-fast
 
-      - name: Upload the XCFramework
-        uses: actions/upload-artifact@v7
-        with:
-          name: ModelpipeFFI.xcframework
-          path: build/ModelpipeFFI.xcframework
-          retention-days: 7
-
-  swift-consume:
-    name: Swift links and calls it
-    runs-on: macos-26
-    needs: [apple-build]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Download the XCFramework
-        uses: actions/download-artifact@v8
-        with:
-          name: ModelpipeFFI.xcframework
-          path: build/ModelpipeFFI.xcframework
-
-      # What this proves and what it does not.
+      # Same job as the build, deliberately.
       #
-      # PROVES: the generated Swift compiles, the static library links, the
-      # symbols resolve, and a call across the boundary returns — including an
-      # async one, which is where a runtime that was never started shows up as
-      # a hang rather than an error.
+      # This was two jobs passing a 622 MB artifact between them, which bought
+      # nothing: the smoke test needs the framework AND the generated Swift
+      # beside it, both are outputs of the step above, and `needs:` meant it
+      # could never run without that step anyway. One job, no upload, no
+      # download, and no way for the two halves to disagree about which build
+      # they are testing.
       #
-      # DOES NOT PROVE: hole punching, NAT traversal, relay behaviour, or
-      # anything about a phone. A CI runner is not a device behind CGNAT. That
-      # measurement is the on-device spike, and no green build here stands in
-      # for it.
-      - name: Link against it and call across the boundary
+      # WHAT THIS PROVES: the generated Swift compiles under the same
+      # strict-concurrency settings the app uses, the static library links,
+      # every symbol resolves, and a call across the boundary returns —
+      # including an async one, which is where a runtime that was never
+      # started shows up as a hang rather than an error.
+      #
+      # WHAT IT DOES NOT PROVE: anything about a network. No hole punching, no
+      # NAT traversal, no relay, no phone. A runner is not a device behind
+      # CGNAT. That measurement is the on-device spike, and a green run here
+      # is not a substitute for it.
+      - name: Swift links and calls it
         run: ./scripts/swift-smoke.sh
 
   ci-success:
@@ -186,7 +175,7 @@ jobs:
     runs-on: ubuntu-latest
     # The single required status check. Adding a job above needs only a line
     # here — no branch-protection change.
-    needs: [fmt, clippy, test, rustdoc, apple-build, swift-consume]
+    needs: [fmt, clippy, test, rustdoc, apple]
     if: always()
     steps:
       - name: Fail if anything upstream failed
