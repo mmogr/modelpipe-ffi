@@ -71,10 +71,18 @@ echo "==> Building three slices (profile ${PROFILE})"
 echo "    iOS ${IPHONEOS_DEPLOYMENT_TARGET}, macOS ${MACOSX_DEPLOYMENT_TARGET}"
 # Apple silicon only. The two x86_64 targets were dropped deliberately: they
 # exist for an Intel Mac running the simulator and for an Intel Mac app, and
-# neither is a machine this ships to. Dropping them also removed the one
-# unexplained reading in this build — those slices came out with deployment
-# floors of 14.0 and 11.0 rather than the 26.0 set below, which applied only
-# to the arm64 targets.
+# neither is a machine this ships to.
+#
+# It did NOT retire the mixed deployment floors, which an earlier version of
+# this comment claimed it would. Those readings survived the change intact —
+# 14.0 on the simulator slice, 11.0 on macOS, iOS 10.0 on the device — because
+# they were never about Intel. They are rustup's PRECOMPILED standard library:
+# 390 objects per slice, the same count in all three, built by the Rust
+# project against its own deployment targets and unmovable from here short of
+# `-Z build-std`. Everything cargo actually compiles — this crate, every
+# dependency, and the C and assembly from ring and blake3 — takes the targets
+# set above, and does so on all three slices. check-slices.sh reads both load
+# commands and asserts the two separately.
 #
 # The consumer has to agree: ggchat's Release configuration leaves
 # ONLY_ACTIVE_ARCH at its default NO, so Xcode asks for every standard
