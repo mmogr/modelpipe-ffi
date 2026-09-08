@@ -230,7 +230,12 @@ jobs:
           git diff -- Package.swift
 
           # Authored as the repository owner, matching every other commit here.
-          git -c user.name="Matt O'"'"'Grady" \
+          # The apostrophe needs no escaping: this is already inside double
+          # quotes, where a single quote is an ordinary character. Reaching for
+          # the '"'"' idiom here — which belongs inside SINGLE quotes — left an
+          # unbalanced quote, and the whole step died on a syntax error after
+          # the build, the smoke test and the checksum had all succeeded.
+          git -c user.name="Matt O'Grady" \
               -c user.email="sewing.wader8c@icloud.com" \
               commit -qm "chore(release): pin the v${version} XCFramework checksum" \
               -- Package.swift

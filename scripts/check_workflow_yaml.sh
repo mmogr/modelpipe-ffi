@@ -82,3 +82,74 @@ else
   exit 1
 end
 '
+
+# Every `run:` block must be valid shell.
+#
+# The failure this exists for: a `run:` block is a string as far as YAML and as
+# far as GitHub are concerned, so a shell syntax error inside one is invisible
+# to every check above and to the whole of CI. It surfaces only when the step
+# runs — and on a release workflow that is after the build, the smoke test and
+# the checksum have all succeeded, seventeen minutes in, on the one run that
+# was supposed to publish something.
+#
+# That is not hypothetical. `git -c user.name="Matt O'"'"'Grady"` used the
+# single-quote-escaping idiom while already inside double quotes, left the
+# quoting unbalanced, and killed the first real release at its second-to-last
+# step. `bash -n` on the rendered block finds it in milliseconds.
+#
+# Rendered, not raw: YAML strips the block scalar's indentation, so the string
+# the shell actually receives is not the text in the file. Checking the file
+# would miss heredoc terminators that only reach column 0 after that strip.
+python3 - <<'PY'
+import glob
+import os
+import subprocess
+import sys
+import tempfile
+
+try:
+    import yaml
+except ImportError:
+    # Same reasoning as the ruby check above: locally a shrug, in CI a lie.
+    if os.environ.get("CI"):
+        print("\033[31m✗\033[0m PyYAML not found and CI is set — refusing to skip", file=sys.stderr)
+        sys.exit(1)
+    print("\033[33m⚠\033[0m PyYAML not found — skipping run-block shell validation")
+    sys.exit(0)
+
+bad = 0
+checked = 0
+for path in sorted(glob.glob(".github/workflows/*.yml")):
+    with open(path) as handle:
+        document = yaml.safe_load(handle)
+    for job_name, job in (document.get("jobs") or {}).items():
+        for step in job.get("steps") or []:
+            script = step.get("run")
+            if not script:
+                continue
+            checked += 1
+            with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as scratch:
+                scratch.write(script)
+                scratch_path = scratch.name
+            result = subprocess.run(
+                ["bash", "-n", scratch_path], capture_output=True, text=True
+            )
+            os.unlink(scratch_path)
+            if result.returncode != 0:
+                bad += 1
+                detail = result.stderr.strip().splitlines()
+                print(
+                    f"\033[31m✗\033[0m {path} → {job_name} → {step.get('name', '(unnamed)')}",
+                    file=sys.stderr,
+                )
+                for line in detail[-2:]:
+                    print(f"    {line.split(': ', 1)[-1]}", file=sys.stderr)
+
+if bad:
+    print(
+        f"\033[31m{bad} run block(s) are not valid shell — the step would die when it ran\033[0m",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+print(f"\033[32m✓\033[0m all {checked} run block(s) are valid shell")
+PY
