@@ -98,6 +98,13 @@ jobs:
       - name: Test
         run: cargo test --no-fail-fast
 
+      # Runs here rather than in the Apple job on purpose. The scaffolding
+      # describes the API, not the machine, so the binding generates from the
+      # host library on Linux in seconds -- and the question it answers ("is
+      # anything exported that CI never calls?") does not need a Mac to ask.
+      - name: The smoke test exercises every exported member
+        run: make surface
+
   rustdoc:
     name: Rustdoc
     runs-on: ubuntu-latest

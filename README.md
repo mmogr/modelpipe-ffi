@@ -190,6 +190,31 @@ ones SwiftPM already passes (`System`, `c`, `m`). `scripts/swift-smoke.sh`
 builds a package with exactly these settings on every CI run, so the
 instructions above are executed rather than merely written down.
 
+### Showing an error: `message()`, never `localizedDescription`
+
+`MpError` carries a sentence written to be read by whoever is holding the
+phone, and `message()` is how to get it:
+
+```swift
+} catch let error as MpError {
+    show(error.message())                     // "The other machine did not answer…"
+    if error.isRetryable() { offerRetry() }
+}
+```
+
+Reaching for `localizedDescription` instead compiles, type-checks, and is
+wrong. UniFFI generates `errorDescription` for every error enum as
+`String(reflecting: self)`, so it yields the Swift *debug* rendering of the
+case and its payload:
+
+```
+modelpipe_ffi.MpError.Bind(reason: "Address already in use (os error 48)")
+```
+
+Nothing fails; a person is simply shown the inside of the binding. The smoke
+test asserts `message()` contains none of that shape, so the two cannot
+quietly become the same thing.
+
 ## Releasing
 
 [release-plz](https://release-plz.dev) maintains a release PR on every push to

@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 .PHONY: help build check clean fmt fmt-check lint test doc doc-check lock-check \
-        enforce slices swift xcframework xcframework-fast spike checksum dev pre-commit ci
+        enforce surface slices swift xcframework xcframework-fast spike checksum dev \
+        pre-commit ci
 
 # Resolve cargo through rustup's shim explicitly, so a standalone toolchain
 # installed by Homebrew cannot silently win over rust-toolchain.toml. Carried
@@ -48,6 +49,9 @@ enforce: ## The architecture gates (no toolchain needed)
 	@./scripts/check_no_credentials.sh
 	@./scripts/check_workflow_yaml.sh
 
+surface: swift ## Fail if the smoke test does not exercise every exported member
+	@./scripts/check-swift-surface.sh
+
 swift: ## Generate the Swift binding from the built library
 	$(CARGO) build --lib
 	$(CARGO) run --bin uniffi-bindgen -- generate \
@@ -83,6 +87,6 @@ dev: fmt lint test ## Format, lint, test
 # before pushing. `xcframework` is deliberately not in here: it needs Xcode,
 # and a target that fails on Linux for a reason that is not the contributor's
 # fault teaches people to ignore the target.
-pre-commit: fmt-check lint check test doc-check lock-check enforce ## Everything CI checks on Linux
+pre-commit: fmt-check lint check test doc-check lock-check enforce surface ## Everything CI checks on Linux
 
 ci: pre-commit ## Alias for pre-commit

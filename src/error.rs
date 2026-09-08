@@ -63,7 +63,34 @@ pub enum MpError {
     },
 }
 
+// Exported, not merely public. Both methods below existed and were tested on
+// the Rust side long before this attribute did, and neither crossed the
+// boundary: Swift got a bare enum, `isRetryable()` did not compile in the
+// consumer, and `message()` did not exist to be missed. A `pub fn` on a type
+// that crosses the FFI is not part of the FFI.
+#[uniffi::export]
 impl MpError {
+    /// The sentence to show a person.
+    ///
+    /// Use this, and not Swift's `localizedDescription`. `UniFFI` generates
+    /// `errorDescription` for every error enum as `String(reflecting: self)`,
+    /// which is the *debug* rendering of the case and its payload:
+    ///
+    /// ```text
+    /// modelpipe_ffi.MpError.Bind(reason: "Address already in use (os error 48)")
+    /// ```
+    ///
+    /// That compiles, reads as a plausible message, and shows somebody the
+    /// inside of the binding. This is the [`Display`] impl below — the one
+    /// written to be read — and the Swift smoke test asserts the difference
+    /// so it cannot quietly become the other thing.
+    ///
+    /// [`Display`]: std::fmt::Display
+    #[must_use]
+    pub fn message(&self) -> String {
+        self.to_string()
+    }
+
     /// Whether dialling again could plausibly succeed without anything else
     /// changing.
     ///
