@@ -66,7 +66,30 @@ That is a gate, not a promise: `scripts/check_no_credentials.sh` fails the
 build if an exported function grows a credential-shaped parameter, or if
 anything formats a ticket or a token into output.
 
-### Status is polled, not streamed
+### Releasing
+
+[release-plz](https://release-plz.dev) maintains a release PR on every push to
+`main` — the version bump and the CHANGELOG entry, read off the conventional
+commits since the last tag. Merging that PR *is* the decision to release: it
+pushes `vX.Y.Z`, which triggers `release.yml` to build the XCFramework
+optimised, run the Swift smoke test against the artifact it is about to
+publish, and attach the zip with its SwiftPM checksum in the notes.
+
+Nothing is published to crates.io. The product here is a binary, so
+`publish = false` appears twice — in `Cargo.toml` to stop a human, and in
+`release-plz.toml` to stop the automation.
+
+Two things worth knowing:
+
+- **The first tag is manual.** release-plz derives the current version from
+  the previous tag and there is none yet, so `v0.1.0` is tagged once by hand
+  (`git tag v0.1.0 && git push origin v0.1.0`). Everything after is automatic.
+- **It needs a `RELEASE_PAT` secret** — a fine-grained PAT scoped to this
+  repository, Contents and Pull requests read/write. Not a preference: events
+  created with the default `GITHUB_TOKEN` trigger no workflows, so the release
+  PR would get no CI and the tag would never start `release.yml`.
+
+## Status is polled, not streamed
 
 There is no callback across the boundary. Rebuild it as an `AsyncStream` on
 the Swift side:
@@ -166,6 +189,29 @@ The list is read off rustc's own link invocation for the iOS target, minus the
 ones SwiftPM already passes (`System`, `c`, `m`). `scripts/swift-smoke.sh`
 builds a package with exactly these settings on every CI run, so the
 instructions above are executed rather than merely written down.
+
+## Releasing
+
+[release-plz](https://release-plz.dev) maintains a release PR on every push to
+`main` — the version bump and the CHANGELOG entry, read off the conventional
+commits since the last tag. Merging that PR *is* the decision to release: it
+pushes `vX.Y.Z`, which triggers `release.yml` to build the XCFramework
+optimised, run the Swift smoke test against the artifact it is about to
+publish, and attach the zip with its SwiftPM checksum in the notes.
+
+Nothing is published to crates.io. The product here is a binary, so
+`publish = false` appears twice — in `Cargo.toml` to stop a human, and in
+`release-plz.toml` to stop the automation.
+
+Two things worth knowing:
+
+- **The first tag is manual.** release-plz derives the current version from
+  the previous tag and there is none yet, so `v0.1.0` is tagged once by hand
+  (`git tag v0.1.0 && git push origin v0.1.0`). Everything after is automatic.
+- **It needs a `RELEASE_PAT` secret** — a fine-grained PAT scoped to this
+  repository, Contents and Pull requests read/write. Not a preference: events
+  created with the default `GITHUB_TOKEN` trigger no workflows, so the release
+  PR would get no CI and the tag would never start `release.yml`.
 
 ## Status
 
