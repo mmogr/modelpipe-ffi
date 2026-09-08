@@ -13,6 +13,27 @@
 # is nothing for release-plz to publish and it must never try.
 
 [workspace]
+# Read the version from git tags, not from crates.io.
+#
+# Without this, `publish = false` alone is not enough: release-plz skips
+# `cargo publish` but still ASKS THE REGISTRY what the latest release is. This
+# crate is never going to be on crates.io, so the answer is always "nothing has
+# been released", the manifest version always looks like the one to release
+# next, and release-plz opens no PR at all — silently, exit zero,
+# `release_pr_output: {"prs":[]}`.
+#
+# That is exactly what happened after the packaging change merged, and it cost
+# a wrong diagnosis first: the empty `build/v*` tag namespace looked like the
+# cause and was not, which is why `build/v0.1.0` was created before this was
+# understood. That tag is load-bearing now — with `git_only`, tags matching
+# `git_tag_name` are where the current version comes from, and without a
+# baseline the first release under this scheme would be treated as an initial
+# one.
+#
+# `git_only` and `publish` may not both be true. `publish` is false below, so
+# this is legal, and the two say different things worth saying separately.
+git_only = true
+
 # Nothing goes to crates.io, ever. The crate's own Cargo.toml says
 # `publish = false` too — that one stops `cargo publish`, this one stops
 # release-plz from reaching for it. Both, because they fail differently: the
