@@ -7,9 +7,24 @@
 # library convention of ignoring it.
 # Do not add Cargo.lock here.
 
-# Generated Swift and the framework built from it. Both are outputs of
-# `make xcframework`, both are attached to a release, and neither is source.
-/generated
+# The generated Swift is TRACKED, and the C half of it is not.
+#
+# `modelpipe_ffi.swift` is this package's Swift face: SwiftPM compiles it as a
+# source target beside the binary one, so a consumer resolving a tag gets the
+# binding and the `.a` as a matched pair. They have to be matched — the
+# generated Swift carries UniFFI's API checksums and calls
+# `fatalError("UniFFI API checksum mismatch")` when they disagree, which is a
+# crash on a device at first dial rather than an error at build time.
+#
+# The header and modulemap are NOT tracked, because they are not read from
+# here: `build-xcframework.sh` copies them into the XCFramework's Headers
+# directory, which is where a consumer sees them.
+#
+# The comment this replaces said of the generated Swift and the framework that
+# "both are attached to a release". Only the framework ever was. That false
+# sentence is what hid the fact that nothing published the binding at all.
+/generated/*FFI.h
+/generated/*FFI.modulemap
 /build
 *.xcframework
 *.xcframework.zip

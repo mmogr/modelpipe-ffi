@@ -128,13 +128,28 @@ echo "==> Generating the Swift binding and its headers"
 # is the one `uniffi-bindgen` can always load. Pointing this at the iOS dylib
 # instead makes the generator's ability to parse a foreign-platform binary a
 # load-bearing assumption, for no benefit.
-rm -rf "${GENERATED_DIR}"
-mkdir -p "${GENERATED_DIR}"
+# Generated into a scratch directory and copied over, rather than wiping
+# `generated/` first. That directory holds tracked source now — it is the
+# package's Swift face — so `rm -rf` on it means every `make xcframework`
+# deletes committed files, and a generate that fails in between leaves the
+# tree missing them with nothing to say so.
+STAGING_DIR="${BUILD_DIR}/generated-staging"
+rm -rf "${STAGING_DIR}"
+mkdir -p "${STAGING_DIR}" "${GENERATED_DIR}"
 cargo build --lib --profile "${PROFILE}"
+# `--no-format` because the bytes must not depend on the machine. uniffi shells
+# out to `xcrun swift-format` and only warns when every formatter is missing,
+# so this file comes out one way on a Mac and another on Linux — invisible
+# while `generated/` was ignored, and a permanently red diff gate the moment it
+# is committed. Formatting a generated file buys nothing anyway.
 cargo run --bin uniffi-bindgen -- generate \
     --library "target/${PROFILE_DIR}/libmodelpipe_ffi.dylib" \
     --language swift \
-    --out-dir "${GENERATED_DIR}"
+    --no-format \
+    --out-dir "${STAGING_DIR}"
+
+# Only now that the generate has succeeded.
+cp "${STAGING_DIR}"/* "${GENERATED_DIR}/"
 
 # Xcode wants the modulemap under this exact name, and wants the header
 # alongside it. UniFFI emits `<name>FFI.modulemap`; renaming is the whole of

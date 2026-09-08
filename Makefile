@@ -56,7 +56,7 @@ swift: ## Generate the Swift binding from the built library
 	$(CARGO) build --lib
 	$(CARGO) run --bin uniffi-bindgen -- generate \
 		--library target/debug/libmodelpipe_ffi$(shell uname -s | grep -q Darwin && echo .dylib || echo .so) \
-		--language swift --out-dir generated
+		--language swift --no-format --out-dir generated
 
 xcframework: ## Build the XCFramework, optimised (macOS only; needs Xcode)
 	@PROFILE=release ./scripts/build-xcframework.sh
