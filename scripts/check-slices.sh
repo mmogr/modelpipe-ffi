@@ -23,10 +23,33 @@ fi
 
 fail=0
 
+# Apple's platform constants, from <mach-o/loader.h>. `otool -l` prints the
+# NUMBER, not the name — which is the whole reason this table exists. The
+# first version of this script grepped for "IOS" and duly failed a perfectly
+# good build three ways, reporting `platform '2 '` as wrong when 2 is exactly
+# what an iOS slice should say.
+platform_name() {
+    case "$1" in
+        1)  echo "MACOS" ;;
+        2)  echo "IOS" ;;
+        3)  echo "TVOS" ;;
+        4)  echo "WATCHOS" ;;
+        5)  echo "BRIDGEOS" ;;
+        6)  echo "MACCATALYST" ;;
+        7)  echo "IOSSIMULATOR" ;;
+        8)  echo "TVOSSIMULATOR" ;;
+        9)  echo "WATCHOSSIMULATOR" ;;
+        10) echo "DRIVERKIT" ;;
+        # Some toolchains print the name directly. Pass anything
+        # non-numeric through rather than mangling it.
+        *)  echo "$1" ;;
+    esac
+}
+
 # Report a slice, then assert one fact about it.
 #   $1 the library inside the framework
 #   $2 a human name for the slice
-#   $3 the platform string `otool -l` must show
+#   $3 the platform name the slice must carry
 check() {
     local lib="$1" name="$2" want="$3"
 
@@ -40,17 +63,25 @@ check() {
     arches="$(lipo -archs "${lib}")"
 
     # `otool -l` on a static library prints the load commands of every member.
-    # The platform is uniform across them, so one grep answers for the slice.
-    local platforms
-    platforms="$(otool -l "${lib}" 2>/dev/null \
+    # The platform is uniform across them, so one reading answers for the
+    # slice. Every distinct value is resolved to a name and collected, so a
+    # slice that somehow mixed two platforms reports both rather than the
+    # first.
+    local raw names=""
+    for raw in $(otool -l "${lib}" 2>/dev/null \
         | awk '/^ *platform /{print $2}' \
-        | sort -u \
-        | tr '\n' ' ')"
+        | sort -u); do
+        names="${names}$(platform_name "${raw}") "
+    done
+    names="${names% }"
 
-    if [[ "${platforms}" == *"${want}"* ]]; then
-        echo "  ok       ${name}  [${arches}]  platform ${platforms}"
+    if [[ -z "${names}" ]]; then
+        echo "  NO DATA  ${name}  [${arches}]  otool reported no platform load command"
+        fail=1
+    elif [[ "${names}" == "${want}" ]]; then
+        echo "  ok       ${name}  [${arches}]  platform ${names}"
     else
-        echo "  WRONG    ${name}  [${arches}]  platform '${platforms}', wanted '${want}'"
+        echo "  WRONG    ${name}  [${arches}]  platform '${names}', wanted '${want}'"
         fail=1
     fi
 }
