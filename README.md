@@ -205,10 +205,30 @@ quietly become the same thing.
 
 [release-plz](https://release-plz.dev) maintains a release PR on every push to
 `main` — the version bump and the CHANGELOG entry, read off the conventional
-commits since the last tag. Merging that PR *is* the decision to release: it
-pushes `vX.Y.Z`, which triggers `release.yml` to build the XCFramework
-optimised, run the Swift smoke test against the artifact it is about to
-publish, and attach the zip with its SwiftPM checksum in the notes.
+commits since the last tag. Merging that PR *is* the decision to release.
+
+What it pushes is **`build/vX.Y.Z`**, and that is not the release tag. It is a
+build trigger. `release.yml` picks it up, builds the XCFramework optimised,
+runs the Swift smoke test against the artifact it is about to publish, writes
+that artifact's checksum into `Package.swift` on `main`, and only then creates
+the public **`vX.Y.Z`** tag on that commit.
+
+The order is the whole design. SwiftPM loads `Package.swift` from the file view
+at whichever tag it resolves, so a release tag naming a commit whose checksum is
+stale is a package nobody can build. There is no chicken and egg — `Package.swift`
+is not an input to the artifact, since the build never opens a manifest and the
+zip holds only the XCFramework — just an order: **build, pin, tag.**
+
+`build/vX.Y.Z` never appears as a package version: SwiftPM's `Version(tag:)`
+strips at most one leading `v` and cannot parse the rest.
+
+The last step of a release is a consumer resolving it. `release.yml` synthesises
+a throwaway package depending on the version just published, with a `.dynamic`
+product so the link is forced, and builds it. That one step executes the entire
+claim at once — the tag exists, its manifest names the uploaded zip, the
+checksum matches, the binding compiles against it, and all seven linker settings
+reach a consumer that declares none. Everything before it tests the repository;
+this tests the release.
 
 Nothing is published to crates.io. The product here is a binary, so
 `publish = false` appears twice — in `Cargo.toml` to stop a human, and in
@@ -216,13 +236,15 @@ Nothing is published to crates.io. The product here is a binary, so
 
 Two things worth knowing:
 
-- **The first tag is manual.** release-plz derives the current version from
-  the previous tag and there is none yet, so `v0.1.0` is tagged once by hand
-  (`git tag v0.1.0 && git push origin v0.1.0`). Everything after is automatic.
+- **`release.yml` commits to `main`.** One commit per release, pinning the
+  checksum, authored as the repository owner. It needs the ruleset protecting
+  `main` to allow a repository-admin bypass, because `RELEASE_PAT` authenticates
+  as its owner. The push happens *before* the release is created, so if it is
+  ever refused, no tag and no release exist and no version has been burned.
 - **It needs a `RELEASE_PAT` secret** — a fine-grained PAT scoped to this
   repository, Contents and Pull requests read/write. Not a preference: events
   created with the default `GITHUB_TOKEN` trigger no workflows, so the release
-  PR would get no CI and the tag would never start `release.yml`.
+  PR would get no CI and the build tag would never start `release.yml`.
 
 ## Status
 

@@ -1,4 +1,18 @@
-# Build the XCFramework on a tag and attach it to a GitHub release.
+# Build the XCFramework, pin its checksum, and create the release tag.
+#
+# THE TAG THIS RUNS ON IS NOT THE RELEASE TAG. release-plz pushes
+# `build/vX.Y.Z` when the release PR merges; this workflow builds the artifact,
+# writes its checksum into Package.swift on main, and only then creates the
+# public `vX.Y.Z` tag on that commit.
+#
+# The ordering is the whole design. SwiftPM loads Package.swift from the file
+# view at the tag it resolves, so a tag naming a commit whose checksum is stale
+# or absent is a package nobody can build. Package.swift is not an input to the
+# artifact — `build-xcframework.sh` never opens a manifest and the zip holds
+# only the XCFramework — so there is no chicken and egg here, just an order:
+# build, pin, tag. `build/vX.Y.Z` is invisible to SwiftPM, whose `Version(tag:)`
+# strips at most one leading `v` and cannot parse it, so it never appears as a
+# package version.
 #
 # Nothing here publishes to crates.io. The crate carries `publish = false` and
 # always will: it is an Apple-platform build artifact, and a source tarball on
@@ -9,8 +23,8 @@ name: Release
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+-*"
+      - "build/v[0-9]+.[0-9]+.[0-9]+"
+      - "build/v[0-9]+.[0-9]+.[0-9]+-*"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -89,7 +103,7 @@ jobs:
         if: github.event_name == 'push'
         run: |
           manifest="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${GITHUB_REF_NAME#build/v}"
           if [[ "${manifest}" != "${tag}" ]]; then
             echo "::error::tag ${tag} but Cargo.toml says ${manifest}"
             exit 1
@@ -103,6 +117,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `main` is fetched below to commit the checksum onto it.
+          fetch-depth: 0
+          # The push uses RELEASE_PAT explicitly rather than whatever the
+          # checkout left in .git/config.
+          persist-credentials: false
 
       - name: Install Rust toolchain
         run: rustup show
@@ -147,27 +167,69 @@ jobs:
           path: build/ModelpipeFFI.xcframework.zip
           retention-days: 14
 
-      # The checksum goes in the body because that is where the consumer
-      # reads it: ggchat's Package.swift needs this exact string beside the
-      # download URL, and a release without it is a release nobody can pin.
+      # Everything from here is the ordering the header describes: pin the
+      # checksum onto main, create the tag on that commit, then prove a
+      # consumer can actually resolve what was just published.
+      - name: Pin the checksum on main
+        if: github.event_name == 'push'
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+        run: |
+          version="${GITHUB_REF_NAME#build/v}"
+          git fetch origin main
+          # `build/` is gitignored, so the artifact and its zip survive this.
+          git checkout -B main origin/main
+
+          # Two dedicated `let` lines that exist only to be rewritten. A sed
+          # against a manifest is fragile when it has to match a line that is
+          # also doing something else; these do nothing else.
+          sed -i '' -E "s|^let version = \".*\"$|let version = \"${version}\"|" Package.swift
+          sed -i '' -E "s|^let checksum = \".*\"$|let checksum = \"${CHECKSUM}\"|" Package.swift
+
+          # A silent no-op here would publish a tag whose manifest names the
+          # PREVIOUS release's zip while the binding beside it is this one's —
+          # mismatched halves, which UniFFI turns into a fatalError on a device
+          # at the first dial rather than an error at build time. So the
+          # substitution has to have changed something.
+          if git diff --quiet -- Package.swift; then
+            echo "::error::the checksum substitution matched nothing in Package.swift"
+            echo "::error::expected lines: let version = \"...\" and let checksum = \"...\""
+            exit 1
+          fi
+          git diff -- Package.swift
+
+          # Authored as the repository owner, matching every other commit here.
+          git -c user.name="Matt O'"'"'Grady" \
+              -c user.email="sewing.wader8c@icloud.com" \
+              commit -qm "chore(release): pin the v${version} XCFramework checksum" \
+              -- Package.swift
+          # The secret is masked in the log. This runs before the release is
+          # created on purpose: if the push is refused, no tag and no release
+          # exist yet and no version has been burned.
+          git push "https://x-access-token:${RELEASE_PAT}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+
+      # The tag is created HERE, from the commit that carries its own checksum,
+      # which is why `--verify-tag` is absent: `gh` creates it from `--target`,
+      # and that is the mechanism rather than an oversight.
       - name: Create the release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-          CHECKSUM: ${{ steps.package.outputs.checksum }}
           SLICES: ${{ steps.package.outputs.slices }}
         run: |
+          version="${GITHUB_REF_NAME#build/v}"
           notes="$(mktemp)"
           {
             echo "## Consuming this release"
             echo
             echo '```swift'
-            echo '.binaryTarget('
-            echo '    name: "ModelpipeFFI",'
-            echo "    url: \"https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/ModelpipeFFI.xcframework.zip\","
-            echo "    checksum: \"${CHECKSUM}\""
-            echo ')'
+            echo ".package(url: \"https://github.com/${GITHUB_REPOSITORY}.git\", from: \"${version}\")"
             echo '```'
+            echo
+            echo "Then \`import Modelpipe\`. The seven system frameworks the static"
+            echo "library needs are declared on the package's own target, so there is"
+            echo "nothing else to add."
             echo
             echo "Slices: ${SLICES}."
             echo "Each was checked to carry the platform load command it claims,"
@@ -177,9 +239,62 @@ jobs:
             echo
           } > "${notes}"
 
-          gh release create "${GITHUB_REF_NAME}" \
+          gh release create "v${version}" \
             build/ModelpipeFFI.xcframework.zip \
-            --title "${GITHUB_REF_NAME}" \
+            --target "$(git rev-parse HEAD)" \
+            --title "v${version}" \
             --notes-file "${notes}" \
-            --generate-notes \
-            --verify-tag
+            --generate-notes
+
+      # The one step that executes the entire release claim at once: the tag
+      # exists, its manifest names the zip that was just uploaded, the checksum
+      # matches, the binding compiles against it, and all seven linker settings
+      # reach a consumer that declares none. `swift package resolve` is what
+      # performs the download and the checksum verification; a `.dynamic`
+      # product is what forces a final link.
+      #
+      # Everything upstream tests the repository. This tests the release.
+      - name: A consumer can actually resolve it
+        if: github.event_name == 'push'
+        run: |
+          version="${GITHUB_REF_NAME#build/v}"
+          gate="$(mktemp -d)"
+          mkdir -p "${gate}/Sources/ResolveGate"
+
+          cat > "${gate}/Package.swift" <<SWIFT
+          // swift-tools-version: 6.2
+          import PackageDescription
+
+          let package = Package(
+              name: "ResolveGate",
+              platforms: [.macOS(.v26)],
+              products: [
+                  .library(name: "ResolveGate", type: .dynamic, targets: ["ResolveGate"])
+              ],
+              dependencies: [
+                  .package(url: "https://github.com/${GITHUB_REPOSITORY}.git", exact: "${version}")
+              ],
+              targets: [
+                  .target(
+                      name: "ResolveGate",
+                      dependencies: [.product(name: "Modelpipe", package: "modelpipe-ffi")]
+                  )
+              ],
+              swiftLanguageModes: [.v6]
+          )
+          SWIFT
+
+          cat > "${gate}/Sources/ResolveGate/Gate.swift" <<'SWIFT'
+          import Modelpipe
+
+          // Never called. It exists so the linker has to resolve the symbols a
+          // real consumer would reach for.
+          public func gate() async throws -> String {
+              let pipe = try await mpConnect(ticket: "nope", options: MpConnectOptions())
+              return pipe.baseUrl()
+          }
+          SWIFT
+
+          cd "${gate}"
+          swift build
+          echo "a consumer resolved v${version}, downloaded the artifact, and linked it"

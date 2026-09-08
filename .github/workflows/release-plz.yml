@@ -11,13 +11,12 @@
 # so could never satisfy the required check, and the pushed tag would never
 # start release.yml, leaving a tag with no framework behind it.
 #
-# The first release is the one exception. release-plz derives the current
-# version from the previous tag, and there is none yet, so v0.1.0 is tagged by
-# hand once:
-#
-#     git tag v0.1.0 && git push origin v0.1.0
-#
-# Everything after that is release-plz's.
+# What merging the release PR pushes is `build/vX.Y.Z`, NOT the release tag.
+# release-plz cannot own the public tag, because the commit that tag must name
+# has to carry the XCFramework's checksum, and that does not exist until the
+# artifact is built. So `release.yml` builds, pins the checksum onto main, and
+# creates `vX.Y.Z` there. See release-plz.toml for the full reasoning.
+
 name: Release-plz
 
 on:
