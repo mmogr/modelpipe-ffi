@@ -75,11 +75,29 @@ check() {
     done
     names="${names% }"
 
+    # The deployment target the slice was actually built with. Reported
+    # always, and failed only on the one value known to be broken: rustc's
+    # apple targets default to iOS 10.0, which cannot resolve
+    # `___chkstk_darwin` and so fails to link against a modern SDK's C
+    # objects. Asserting an exact value here would make this gate fail on
+    # any legitimate bump; asserting against the known-bad default cannot.
+    local minos
+    minos="$(otool -l "${lib}" 2>/dev/null \
+        | awk '/^ *minos /{print $2}' \
+        | sort -u \
+        | tr '\n' ' ')"
+    minos="${minos% }"
+
+    if [[ "${minos}" == 10.* ]]; then
+        echo "  WRONG    ${name}  [${arches}]  minos ${minos} is rustc's default, not a chosen floor"
+        fail=1
+    fi
+
     if [[ -z "${names}" ]]; then
         echo "  NO DATA  ${name}  [${arches}]  otool reported no platform load command"
         fail=1
     elif [[ "${names}" == "${want}" ]]; then
-        echo "  ok       ${name}  [${arches}]  platform ${names}"
+        echo "  ok       ${name}  [${arches}]  platform ${names}  minos ${minos:-?}"
     else
         echo "  WRONG    ${name}  [${arches}]  platform '${names}', wanted '${want}'"
         fail=1

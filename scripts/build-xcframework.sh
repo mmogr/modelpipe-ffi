@@ -42,7 +42,33 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     exit 1
 fi
 
+# Deployment targets, and why they are set at all.
+#
+# rustc's `aarch64-apple-ios` target still defaults to a deployment target of
+# **iOS 10.0**, while the C and assembly in the dependency tree — blake3's
+# NEON, ring's — are compiled by `cc` against whatever SDK is installed. That
+# mismatch is not cosmetic. `___chkstk_darwin` arrived in iOS 13 and does not
+# exist in an iOS 10 runtime, so linking the cdylib fails outright:
+#
+#     Undefined symbols for architecture arm64:
+#       "___chkstk_darwin", referenced from:
+#           _blake3_hash4_neon in libblake3...
+#
+# It hid in release, where optimisation drops the NEON path so the symbol is
+# never referenced, and appeared the moment CI started building unoptimised.
+# The bug was there the whole time.
+#
+# 26.0 rather than the 13.0 that would merely make it link: ggchat declares
+# `platforms: [.iOS(.v26), .macOS(.v26)]`, so a library with a lower floor
+# buys reach no consumer of this can use, and a floor *above* the consumer's
+# would be a link error in their project rather than ours. Matching is the
+# only setting that cannot be wrong. Overridable, for anyone whose app is not
+# ggchat.
+export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-26.0}"
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-26.0}"
+
 echo "==> Building five slices (profile ${PROFILE})"
+echo "    iOS ${IPHONEOS_DEPLOYMENT_TARGET}, macOS ${MACOSX_DEPLOYMENT_TARGET}"
 TARGETS=(
     aarch64-apple-ios
     aarch64-apple-ios-sim
