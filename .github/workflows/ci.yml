@@ -1,0 +1,196 @@
+# Adapted from modelpipe's ci.yml, plus the Apple half that workspace has no
+# infrastructure for. modelpipe's `matrix.target` values are labels used for
+# job names and cache keys; the cargo commands there never pass `--target`.
+# Here they do, because producing Apple objects is the entire point.
+#
+# The enforcement scripts live in the `fmt` job because none of them needs a
+# toolchain: they count lines and grep for shapes.
+#
+# No `apt-get install` step anywhere below: iroh resolves rustls onto `ring`,
+# which needs no system libraries. If a future dependency flips the graph to
+# `aws-lc-sys`, these jobs start needing cmake and a C toolchain — the lockfile
+# is where that change is visible.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on a branch, never on main: a cancelled run on main
+# is a lost integration signal, which is exactly the defect ggchat spent #44
+# fixing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Read-only across the board: nothing in CI writes to the repo, and the
+# checkout credential this scopes down is otherwise sitting in .git/config for
+# the whole build — including every build script cargo runs.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check workflow YAML for duplicate keys
+        run: ./scripts/check_workflow_yaml.sh
+
+      - name: Check file sizes
+        run: ./scripts/check_file_size.sh
+
+      # The design property this crate is most able to lose by accident, and
+      # the one whose loss is least visible in review.
+      - name: No credential crosses the boundary
+        run: ./scripts/check_no_credentials.sh
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Lockfile guard
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      # The suite binds real loopback sockets and dials a ticket that names a
+      # machine which does not exist. It reaches no relay and no discovery
+      # service: every test passes `discovery: false, port_mapping: false`, so
+      # a runner with no outbound network still runs the whole thing.
+      - name: Test
+        run: cargo test --no-fail-fast
+
+  rustdoc:
+    name: Rustdoc
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Public docs
+        run: cargo doc --no-deps
+
+      - name: Private docs
+        run: cargo doc --no-deps --document-private-items
+
+  apple-build:
+    name: Apple build (five slices)
+    runs-on: macos-26
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # Builds all five slices, generates the Swift, assembles the framework,
+      # and then asserts each slice carries the platform load command it
+      # claims. That last step is the one that matters: a cross-compile which
+      # silently produced host objects succeeds everywhere else and fails at
+      # link time in the consuming app, days later.
+      - name: Build the XCFramework
+        run: make xcframework
+
+      - name: Upload the XCFramework
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModelpipeFFI.xcframework
+          path: build/ModelpipeFFI.xcframework
+          retention-days: 7
+
+  swift-consume:
+    name: Swift links and calls it
+    runs-on: macos-26
+    needs: [apple-build]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the XCFramework
+        uses: actions/download-artifact@v4
+        with:
+          name: ModelpipeFFI.xcframework
+          path: build/ModelpipeFFI.xcframework
+
+      # What this proves and what it does not.
+      #
+      # PROVES: the generated Swift compiles, the static library links, the
+      # symbols resolve, and a call across the boundary returns — including an
+      # async one, which is where a runtime that was never started shows up as
+      # a hang rather than an error.
+      #
+      # DOES NOT PROVE: hole punching, NAT traversal, relay behaviour, or
+      # anything about a phone. A CI runner is not a device behind CGNAT. That
+      # measurement is the on-device spike, and no green build here stands in
+      # for it.
+      - name: Link against it and call across the boundary
+        run: ./scripts/swift-smoke.sh
+
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    # The single required status check. Adding a job above needs only a line
+    # here — no branch-protection change.
+    needs: [fmt, clippy, test, rustdoc, apple-build, swift-consume]
+    if: always()
+    steps:
+      - name: Fail if anything upstream failed
+        run: |
+          if echo '${{ toJSON(needs) }}' | grep -q '"result": *"failure"'; then
+            echo "::error::a required job failed"
+            exit 1
+          fi
+          if echo '${{ toJSON(needs) }}' | grep -q '"result": *"cancelled"'; then
+            echo "::error::a required job was cancelled"
+            exit 1
+          fi
+          echo "all required jobs succeeded"
