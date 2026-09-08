@@ -1,0 +1,51 @@
+# Build artifacts
+/target
+**/*.rs.bk
+
+# Cargo.lock is COMMITTED. This crate ships a binary artifact (an XCFramework
+# built from an exact dependency set), so a reproducible build wins over the
+# library convention of ignoring it.
+# Do not add Cargo.lock here.
+
+# Generated Swift and the framework built from it. Both are outputs of
+# `make xcframework`, both are attached to a release, and neither is source.
+/generated
+/build
+*.xcframework
+*.xcframework.zip
+
+# Secrets — nothing here should ever be a committed file, but this crate's
+# whole subject is tickets and tokens, so make the mistake harder.
+.env
+.env.*
+*.pem
+*.key
+
+# Local AI/assistant tooling — never tracked. Carried over from modelpipe and
+# gglib, where these are scratch space for coding assistants (session state,
+# worktrees, handoff notes). Machine-local, and must not enter history.
+.claude/
+.cursor/
+.aider*
+.continue/
+.codeium/
+.github/copilot-instructions.md
+CLAUDE.md
+AGENTS.md
+
+# Editors / tooling
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.iml
+.direnv/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Swift package build output from the consuming smoke test
+.build/

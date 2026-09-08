@@ -1,0 +1,168 @@
+# Build the XCFramework on a tag and attach it to a GitHub release.
+#
+# Nothing here publishes to crates.io. The crate carries `publish = false` and
+# always will: it is an Apple-platform build artifact, and a source tarball on
+# a registry would be a download nobody can use. The release *asset* is the
+# product, and its checksum is what the consuming app pins.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and check, but create no release"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # A tag on a branch that never merged is a release of code nobody
+      # reviewed. Cheap to check, and the check is the whole point of tagging
+      # from main.
+      - name: Refuse a tag that is not on main
+        if: github.event_name == 'push'
+        run: |
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::${GITHUB_REF_NAME} is not an ancestor of main"
+            exit 1
+          fi
+          echo "tag is on main"
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      # Publishing a release is irreversible; a grep is not. Same step
+      # modelpipe carries, with this crate's own src path.
+      - name: Refuse to release unimplemented code
+        run: |
+          if grep -rn --include='*.rs' -E '\b(todo!|unimplemented!)\(' src; then
+            echo "::error::the tree above still has unimplemented bodies"
+            exit 1
+          fi
+          echo "no unimplemented bodies"
+
+      - name: Architecture gates
+        run: make enforce
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lockfile guard
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --no-fail-fast
+
+      - name: Docs
+        run: cargo doc --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      # The tag says a version; the manifest says a version. A release where
+      # they disagree is one nobody can later identify from the artifact.
+      - name: Tag matches the manifest
+        if: github.event_name == 'push'
+        run: |
+          manifest="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          tag="${GITHUB_REF_NAME#v}"
+          if [[ "${manifest}" != "${tag}" ]]; then
+            echo "::error::tag ${tag} but Cargo.toml says ${manifest}"
+            exit 1
+          fi
+          echo "tag and manifest agree on ${manifest}"
+
+  build:
+    name: Build the XCFramework
+    runs-on: macos-26
+    needs: [verify]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # Builds every slice and asserts each one is the platform it claims.
+      - name: Build
+        run: make xcframework
+
+      # Proves the artifact about to be released actually links and answers,
+      # rather than merely having been produced.
+      - name: Swift links and calls it
+        run: ./scripts/swift-smoke.sh
+
+      - name: Zip and checksum
+        id: package
+        run: |
+          cd build
+          zip -qry ModelpipeFFI.xcframework.zip ModelpipeFFI.xcframework
+          checksum="$(swift package compute-checksum ModelpipeFFI.xcframework.zip)"
+          echo "checksum=${checksum}" >> "${GITHUB_OUTPUT}"
+          echo "The consuming app pins this: ${checksum}"
+
+      - name: Upload the artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModelpipeFFI.xcframework.zip
+          path: build/ModelpipeFFI.xcframework.zip
+          retention-days: 14
+
+      # The checksum goes in the body because that is where the consumer
+      # reads it: ggchat's Package.swift needs this exact string beside the
+      # download URL, and a release without it is a release nobody can pin.
+      - name: Create the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+        run: |
+          notes="$(mktemp)"
+          {
+            echo "## Consuming this release"
+            echo
+            echo '```swift'
+            echo '.binaryTarget('
+            echo '    name: "ModelpipeFFI",'
+            echo "    url: \"https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/ModelpipeFFI.xcframework.zip\","
+            echo "    checksum: \"${CHECKSUM}\""
+            echo ')'
+            echo '```'
+            echo
+            echo "Slices: \`ios-arm64\`, \`ios-arm64_x86_64-simulator\`, \`macos-arm64_x86_64\`."
+            echo "Each was checked to carry the platform load command it claims."
+            echo
+            echo "---"
+            echo
+          } > "${notes}"
+
+          gh release create "${GITHUB_REF_NAME}" \
+            build/ModelpipeFFI.xcframework.zip \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file "${notes}" \
+            --generate-notes \
+            --verify-tag

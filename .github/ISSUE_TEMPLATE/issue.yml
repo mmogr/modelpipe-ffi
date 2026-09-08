@@ -1,0 +1,52 @@
+name: Issue
+description: File a bug, feature, or other piece of work
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part does this touch? Select all that apply.
+      multiple: true
+      options:
+        - binding
+        - build
+        - docs
+        - ci
+        - scripts
+        - tests
+        - deps
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - bug
+        - feature
+        - question
+        - decision
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: >-
+        What is wrong, or what should exist. If it is a bug, say what happened
+        and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >-
+        A file and line, a build log, or the command you ran. A claim with
+        nothing under it is a claim someone else has to go and check.
+        Never paste a ticket or a bearer token here.
+    validations:
+      required: false

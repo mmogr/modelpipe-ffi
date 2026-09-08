@@ -1,0 +1,76 @@
+[package]
+name = "modelpipe-ffi"
+version = "0.1.0"
+edition = "2024"
+# The honest floor, inherited from the crate this binds: the iroh stack
+# declares rust-version 1.91, and nothing here can promise a build modelpipe
+# cannot deliver.
+rust-version = "1.91"
+license = "MIT"
+repository = "https://github.com/mmogr/modelpipe-ffi"
+authors = ["mmogr"]
+description = "Swift bindings for modelpipe - reach your local model server from an Apple device"
+readme = "README.md"
+
+# Never goes to crates.io. This crate is an Apple-platform build artifact
+# whose output is an XCFramework attached to a GitHub release; a source tarball
+# on a registry would be a download nobody can use. `publish = false` is also
+# what keeps it out of any future `cargo publish --workspace`.
+publish = false
+
+[lib]
+name = "modelpipe_ffi"
+# staticlib is what Xcode links; cdylib is what `uniffi-bindgen` loads to read
+# the scaffolding out of; lib (rlib) is what this crate's own tests link. Drop
+# the last one and `cargo test` cannot see its own crate.
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[[bin]]
+# The generator, run by `make swift`. UniFFI's documented shape: a bin in the
+# crate being bound, so the generated Swift is always read out of the exact
+# scaffolding this build produced rather than a separately-versioned tool.
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+# The whole point. 0.4 is the floor, not a preference: `status_changed_since`,
+# `notify_network_change` and `network_metrics` landed in it (modelpipe #51),
+# and the first of those is the accessor a language binding is supposed to use.
+modelpipe = "0.4"
+uniffi = { version = "0.32", features = ["tokio", "cli"] }
+# Multi-thread, because modelpipe's futures are all Send (its own
+# `future_promises` pins that) and the pipe should not stall on one worker.
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[lints.rust]
+# Denied, exactly as modelpipe denies it. The FFI boundary needs `unsafe`,
+# but only inside UniFFI's macro expansion — so the exception is granted at
+# the one item that expands to it (`setup_scaffolding!` in lib.rs) rather
+# than to the crate. Every hand-written line in src/ is checked, which is the
+# whole point: "this crate needs unsafe" is true of six generated lines and
+# false of everything a human wrote here.
+unsafe_code = "deny"
+missing_docs = "deny"
+unreachable_pub = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# Same allow modelpipe carries, for the same reason: `pub(crate)` inside a
+# private module states the intended reach at the item, which survives the
+# module later becoming public. The lint would have us drop the marker and
+# rely on the module's privacy alone.
+redundant_pub_crate = "allow"
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+codegen-units = 16

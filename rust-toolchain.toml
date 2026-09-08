@@ -1,0 +1,18 @@
+# Pinned, not "stable": CI and every contributor build with the exact
+# compiler, so a lint that fires on one machine fires on all of them. Kept in
+# step with modelpipe's own pin, because this crate compiles that crate's
+# source and a split would mean two compilers on one dependency tree.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+# The Apple triples this crate exists to produce. Listed here so `rustup show`
+# installs them, and a contributor cloning this repo can run `make xcframework`
+# without first discovering which targets it wanted.
+targets = [
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+    "x86_64-apple-ios",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
