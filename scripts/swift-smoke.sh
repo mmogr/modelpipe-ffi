@@ -121,8 +121,10 @@ do {
         fail("a malformed ticket was reported as worth dialling again")
     }
 
+    // The same contract `every_error_is_a_sentence` holds on the Rust side:
+    // a whole sentence, so a full stop or a closing bracket.
     let message = error.message()
-    guard !message.isEmpty, message.hasSuffix(".") else {
+    guard !message.isEmpty, message.hasSuffix(".") || message.hasSuffix(")") else {
         fail("the error message is not a sentence: \(message)")
     }
     // The trap: UniFFI generates `errorDescription` for every error enum as
