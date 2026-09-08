@@ -20,7 +20,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 BUILD_DIR="${ROOT_DIR}/build"
-GENERATED_DIR="${ROOT_DIR}/generated"
+STAGING_DIR="${ROOT_DIR}/build/generated-staging"
+# Tracked source, not an output directory. See .gitignore.
+SWIFT_SRC_DIR="${ROOT_DIR}/Sources/Modelpipe"
 FRAMEWORK="${BUILD_DIR}/ModelpipeFFI.xcframework"
 LIB_NAME="libmodelpipe_ffi.a"
 # `PROFILE` is the cargo profile name; the output directory is not always the
@@ -128,14 +130,12 @@ echo "==> Generating the Swift binding and its headers"
 # is the one `uniffi-bindgen` can always load. Pointing this at the iOS dylib
 # instead makes the generator's ability to parse a foreign-platform binary a
 # load-bearing assumption, for no benefit.
-# Generated into a scratch directory and copied over, rather than wiping
-# `generated/` first. That directory holds tracked source now — it is the
-# package's Swift face — so `rm -rf` on it means every `make xcframework`
-# deletes committed files, and a generate that fails in between leaves the
-# tree missing them with nothing to say so.
-STAGING_DIR="${BUILD_DIR}/generated-staging"
+# Generated into a scratch directory and copied over, rather than written
+# straight to its destination. `Sources/Modelpipe/` holds tracked source now, so
+# a generate that fails halfway must not be able to leave it truncated or
+# missing.
 rm -rf "${STAGING_DIR}"
-mkdir -p "${STAGING_DIR}" "${GENERATED_DIR}"
+mkdir -p "${STAGING_DIR}" "${SWIFT_SRC_DIR}"
 cargo build --lib --profile "${PROFILE}"
 # `--no-format` because the bytes must not depend on the machine. uniffi shells
 # out to `xcrun swift-format` and only warns when every formatter is missing,
@@ -149,15 +149,15 @@ cargo run --bin uniffi-bindgen -- generate \
     --out-dir "${STAGING_DIR}"
 
 # Only now that the generate has succeeded.
-cp "${STAGING_DIR}"/* "${GENERATED_DIR}/"
+cp "${STAGING_DIR}/modelpipe_ffi.swift" "${SWIFT_SRC_DIR}/"
 
 # Xcode wants the modulemap under this exact name, and wants the header
 # alongside it. UniFFI emits `<name>FFI.modulemap`; renaming is the whole of
 # the adaptation.
 HEADERS_DIR="${BUILD_DIR}/headers"
 mkdir -p "${HEADERS_DIR}"
-cp "${GENERATED_DIR}"/*.h "${HEADERS_DIR}/"
-cp "${GENERATED_DIR}"/*.modulemap "${HEADERS_DIR}/module.modulemap"
+cp "${STAGING_DIR}"/*.h "${HEADERS_DIR}/"
+cp "${STAGING_DIR}"/*.modulemap "${HEADERS_DIR}/module.modulemap"
 
 echo "==> Assembling the XCFramework"
 rm -rf "${FRAMEWORK}"

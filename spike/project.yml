@@ -48,7 +48,7 @@ targets:
       - path: Sources
       # The generated binding, taken straight from the build rather than
       # copied in, so the spike can never test a stale API shape.
-      - path: ../generated/modelpipe_ffi.swift
+      - path: ../Sources/Modelpipe/modelpipe_ffi.swift
     info:
       path: Info.plist
       properties:

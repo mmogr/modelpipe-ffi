@@ -29,72 +29,42 @@ if [[ ! -d "${FRAMEWORK}" ]]; then
     exit 1
 fi
 
-# The generated Swift is an output of the framework build, not a checked-in
-# file, so regenerate rather than assume it is lying around.
-if [[ ! -f "${ROOT_DIR}/generated/modelpipe_ffi.swift" ]]; then
-    echo "error: generated/modelpipe_ffi.swift not found. Run \`make xcframework\` first." >&2
+if [[ ! -f "${ROOT_DIR}/Sources/Modelpipe/modelpipe_ffi.swift" ]]; then
+    echo "error: Sources/Modelpipe/modelpipe_ffi.swift not found. Run \`make swift\` first." >&2
     exit 1
 fi
 
 rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}/Sources/Smoke"
 
-cp "${ROOT_DIR}/generated/modelpipe_ffi.swift" "${WORK_DIR}/Sources/Smoke/"
-
 cat > "${WORK_DIR}/Package.swift" <<'SWIFT'
 // swift-tools-version: 6.2
 import PackageDescription
 
-// Matches the consuming app's settings on the two that matter: Swift 6
-// language mode and complete strict concurrency. Generated code that is not
-// `Sendable`-clean fails here rather than in ggchat.
+// Depends on the repository's OWN manifest rather than restating it.
 //
-// THE LINKER SETTINGS ARE NOT OPTIONAL, AND ggchat WILL NEED THE SAME ONES.
+// This used to be a hand-written copy: a binaryTarget pointing at a framework
+// copied in beside it, the generated Swift copied into this target's sources,
+// and the seven linkerSettings spelled out again in a heredoc. It passed, and
+// it proved the wrong thing. README.md claimed those settings were "executed
+// rather than merely written down" while what CI executed was a duplicate of
+// them — so the real manifest could have been wrong in any way at all and this
+// would still have gone green.
 //
-// A static library does not carry its own dependencies. When rustc links a
-// binary it passes the system frameworks itself; a `.a` handed to someone
-// else records that it *references* those symbols and nothing about where
-// they live. Omit them and the build gets all the way to the last step:
-//
-//     __RNvMs_...system_configuration...SCNetworkInterfaceType13from_cfstring
-//         in libmodelpipe_ffi.a[arm64]
-//     ld: symbol(s) not found for architecture arm64
-//
-// This list is read off rustc's own link invocation for the iOS target, minus
-// the ones SwiftPM already passes (System, c, m).
+// Consuming the package makes the claim literal, and it puts one more thing
+// under test that nothing else here checks: whether SwiftPM propagates a
+// dependency's linkerSettings to the consumer's link. If it does not, this
+// fails at `ld` and the answer arrives as a red build rather than as a
+// discovery in somebody's app.
 let package = Package(
     name: "Smoke",
-    // 26, matching both the framework's deployment floor and ggchat's own
-    // `platforms: [.iOS(.v26), .macOS(.v26)]`. At 14 this still linked, and
-    // said so about eight hundred times:
-    //
-    //     ld: warning: object file (libmodelpipe_ffi.a[790](...rcgu.o)) was
-    //         built for newer 'macOS' version (26.0) than being linked (14.0)
-    //
-    // Warnings rather than errors, so nothing failed — but the comment below
-    // claims this package matches the consuming app, and a floor twelve
-    // versions under it did not. A smoke test whose configuration nobody
-    // ships is testing something nobody ships.
     platforms: [.macOS(.v26)],
+    dependencies: [.package(path: "../..")],
     targets: [
-        .binaryTarget(name: "ModelpipeFFI", path: "ModelpipeFFI.xcframework"),
         .executableTarget(
             name: "Smoke",
-            dependencies: ["ModelpipeFFI"],
-            linkerSettings: [
-                // iroh's transport: interface enumeration and reachability.
-                .linkedFramework("SystemConfiguration"),
-                // rustls-platform-verifier, via security-framework — the
-                // Apple trust store, which is why there is no bundled CA set.
-                .linkedFramework("Security"),
-                .linkedFramework("Network"),
-                .linkedFramework("CoreFoundation"),
-                .linkedFramework("Foundation"),
-                // objc2's runtime calls, and iconv from the C dependencies.
-                .linkedLibrary("objc"),
-                .linkedLibrary("iconv"),
-            ]
-        ),
+            dependencies: [.product(name: "Modelpipe", package: "modelpipe-ffi")]
+        )
     ],
     swiftLanguageModes: [.v6]
 )
@@ -102,6 +72,7 @@ SWIFT
 
 cat > "${WORK_DIR}/Sources/Smoke/main.swift" <<'SMOKE_SWIFT'
 import Foundation
+import Modelpipe
 
 // modelpipe's normative ticket vector 1. Well-formed, and names an endpoint
 // nothing is listening on — so the dial binds a port and then sits at `idle`,
@@ -220,10 +191,13 @@ print("ok  the status sequence ends")
 print("smoke: the binding links and answers across the boundary")
 SMOKE_SWIFT
 
-cp -R "${FRAMEWORK}" "${WORK_DIR}/ModelpipeFFI.xcframework"
-
 echo "==> Building and running the smoke executable"
 cd "${WORK_DIR}"
+
+# Point the dependency's binaryTarget at the framework just built rather than
+# at the last published release, which is the whole point of running this
+# before publishing anything.
+export MODELPIPE_FFI_LOCAL_XCFRAMEWORK=1
 
 # Bounded, and the bound is the point rather than caution.
 #

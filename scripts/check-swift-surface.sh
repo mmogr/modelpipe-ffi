@@ -20,7 +20,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BINDING="${1:-${ROOT_DIR}/generated/modelpipe_ffi.swift}"
+BINDING="${1:-${ROOT_DIR}/Sources/Modelpipe/modelpipe_ffi.swift}"
 SMOKE="${ROOT_DIR}/scripts/swift-smoke.sh"
 
 if [[ ! -f "${BINDING}" ]]; then

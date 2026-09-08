@@ -103,7 +103,7 @@ jobs:
       # host library on Linux in seconds -- and the question it answers ("is
       # anything exported that CI never calls?") does not need a Mac to ask.
       - name: The smoke test exercises every exported member
-        run: make surface
+        run: make surface binding-check
 
   rustdoc:
     name: Rustdoc

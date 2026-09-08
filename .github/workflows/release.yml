@@ -76,7 +76,7 @@ jobs:
         run: cargo test --locked --no-fail-fast
 
       - name: The smoke test exercises every exported member
-        run: make surface
+        run: make surface binding-check
 
       - name: Docs
         run: cargo doc --no-deps --locked
