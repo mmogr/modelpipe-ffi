@@ -137,8 +137,14 @@ jobs:
       # claims. That last step is the one that matters: a cross-compile which
       # silently produced host objects succeeds everywhere else and fails at
       # link time in the consuming app, days later.
+      # Unoptimised on purpose. This job answers "does it cross-compile,
+      # assemble, and carry the right platform load commands" — none of which
+      # optimisation changes. Five release builds of iroh with thin LTO, on a
+      # runner billed at ten times the Linux rate, is not a per-commit cost
+      # worth paying for an answer that is the same either way. The release
+      # workflow builds the optimised one, where it belongs.
       - name: Build the XCFramework
-        run: make xcframework
+        run: make xcframework-fast
 
       - name: Upload the XCFramework
         uses: actions/upload-artifact@v7

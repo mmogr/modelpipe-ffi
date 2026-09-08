@@ -23,7 +23,18 @@ BUILD_DIR="${ROOT_DIR}/build"
 GENERATED_DIR="${ROOT_DIR}/generated"
 FRAMEWORK="${BUILD_DIR}/ModelpipeFFI.xcframework"
 LIB_NAME="libmodelpipe_ffi.a"
+# `PROFILE` is the cargo profile name; the output directory is not always the
+# same word. Cargo's debug profile is called `dev` and lands in `target/*/debug`,
+# which `--profile debug` does not even accept. Getting this wrong produces a
+# script that works in release and fails in debug with a path that does not
+# exist, so the two are separate variables rather than one string used twice.
 PROFILE="${PROFILE:-release}"
+if [[ "${PROFILE}" == "dev" || "${PROFILE}" == "debug" ]]; then
+    PROFILE="dev"
+    PROFILE_DIR="debug"
+else
+    PROFILE_DIR="${PROFILE}"
+fi
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "error: this needs Xcode, so it only runs on macOS." >&2
@@ -31,7 +42,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     exit 1
 fi
 
-echo "==> Building five slices (${PROFILE})"
+echo "==> Building five slices (profile ${PROFILE})"
 TARGETS=(
     aarch64-apple-ios
     aarch64-apple-ios-sim
@@ -49,22 +60,29 @@ rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}/ios-sim" "${BUILD_DIR}/macos"
 
 lipo -create \
-    "target/aarch64-apple-ios-sim/${PROFILE}/${LIB_NAME}" \
-    "target/x86_64-apple-ios/${PROFILE}/${LIB_NAME}" \
+    "target/aarch64-apple-ios-sim/${PROFILE_DIR}/${LIB_NAME}" \
+    "target/x86_64-apple-ios/${PROFILE_DIR}/${LIB_NAME}" \
     -output "${BUILD_DIR}/ios-sim/${LIB_NAME}"
 
 lipo -create \
-    "target/aarch64-apple-darwin/${PROFILE}/${LIB_NAME}" \
-    "target/x86_64-apple-darwin/${PROFILE}/${LIB_NAME}" \
+    "target/aarch64-apple-darwin/${PROFILE_DIR}/${LIB_NAME}" \
+    "target/x86_64-apple-darwin/${PROFILE_DIR}/${LIB_NAME}" \
     -output "${BUILD_DIR}/macos/${LIB_NAME}"
 
 echo "==> Generating the Swift binding and its headers"
-# Read out of the dylib rather than a UDL file: the scaffolding compiled into
-# the library is the only description of it that cannot drift from the library.
+# Read out of a built library rather than a UDL file: the scaffolding compiled
+# into the library is the only description of it that cannot drift from it.
+#
+# Read out of the HOST library specifically. The scaffolding is identical
+# across targets — it describes the API, not the machine — and the host build
+# is the one `uniffi-bindgen` can always load. Pointing this at the iOS dylib
+# instead makes the generator's ability to parse a foreign-platform binary a
+# load-bearing assumption, for no benefit.
 rm -rf "${GENERATED_DIR}"
 mkdir -p "${GENERATED_DIR}"
+cargo build --lib --profile "${PROFILE}"
 cargo run --bin uniffi-bindgen -- generate \
-    --library "target/aarch64-apple-ios/${PROFILE}/libmodelpipe_ffi.dylib" \
+    --library "target/${PROFILE_DIR}/libmodelpipe_ffi.dylib" \
     --language swift \
     --out-dir "${GENERATED_DIR}"
 
@@ -79,7 +97,7 @@ cp "${GENERATED_DIR}"/*.modulemap "${HEADERS_DIR}/module.modulemap"
 echo "==> Assembling the XCFramework"
 rm -rf "${FRAMEWORK}"
 xcodebuild -create-xcframework \
-    -library "target/aarch64-apple-ios/${PROFILE}/${LIB_NAME}" -headers "${HEADERS_DIR}" \
+    -library "target/aarch64-apple-ios/${PROFILE_DIR}/${LIB_NAME}" -headers "${HEADERS_DIR}" \
     -library "${BUILD_DIR}/ios-sim/${LIB_NAME}" -headers "${HEADERS_DIR}" \
     -library "${BUILD_DIR}/macos/${LIB_NAME}" -headers "${HEADERS_DIR}" \
     -output "${FRAMEWORK}"
