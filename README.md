@@ -128,7 +128,7 @@ not build it.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mmogr/modelpipe-ffi.git", from: "0.1.1"),
+    .package(url: "https://github.com/mmogr/modelpipe-ffi.git", from: "0.1.2"),
 ],
 targets: [
     .target(
