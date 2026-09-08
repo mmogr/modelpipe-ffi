@@ -1,13 +1,12 @@
 .DEFAULT_GOAL := help
 .PHONY: help build check clean fmt fmt-check lint test doc doc-check lock-check \
-        enforce slices swift xcframework checksum dev pre-commit ci
+        enforce slices swift xcframework xcframework-fast spike checksum dev pre-commit ci
 
 # Resolve cargo through rustup's shim explicitly, so a standalone toolchain
 # installed by Homebrew cannot silently win over rust-toolchain.toml. Carried
 # over from modelpipe, where the same trap was hit.
 CARGO ?= $(shell command -v rustup >/dev/null 2>&1 && echo "rustup run --install $$(grep -m1 channel rust-toolchain.toml | cut -d'"' -f2) cargo" || echo cargo)
 
-PROFILE ?= release
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -55,8 +54,21 @@ swift: ## Generate the Swift binding from the built library
 		--library target/debug/libmodelpipe_ffi$(shell uname -s | grep -q Darwin && echo .dylib || echo .so) \
 		--language swift --out-dir generated
 
-xcframework: ## Build the XCFramework (macOS only; needs Xcode)
-	@./scripts/build-xcframework.sh
+xcframework: ## Build the XCFramework, optimised (macOS only; needs Xcode)
+	@PROFILE=release ./scripts/build-xcframework.sh
+
+xcframework-fast: ## Build the XCFramework unoptimised, for a quick check
+	@PROFILE=dev ./scripts/build-xcframework.sh
+
+spike: ## Build the framework, then generate and open the on-device spike app
+	@command -v xcodegen >/dev/null 2>&1 || { \
+		echo "error: xcodegen not found. brew install xcodegen"; exit 1; }
+	@$(MAKE) xcframework
+	@cd spike && xcodegen generate --quiet
+	@echo
+	@echo "Generated spike/ModelpipeSpike.xcodeproj — see spike/README.md."
+	@echo "Put the phone on CELLULAR, not wifi, or this measures your LAN."
+	@open spike/ModelpipeSpike.xcodeproj
 
 slices: ## Re-check an already-built XCFramework's slices
 	@./scripts/check-slices.sh build/ModelpipeFFI.xcframework

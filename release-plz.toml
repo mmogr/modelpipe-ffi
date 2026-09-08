@@ -1,0 +1,47 @@
+# How a release happens here, and where the line is.
+#
+# release-plz owns everything up to the tag: it reads the conventional commits
+# since the last one, bumps the version, writes CHANGELOG.md, and keeps a
+# release PR open with both. Merging that PR is the decision to release, and
+# the tag is pushed for you.
+#
+# `release.yml` owns everything after: the tag triggers it, and it verifies,
+# builds the XCFramework optimised, runs the Swift smoke test against the
+# artifact it is about to publish, and attaches the zip with its checksum.
+#
+# The split matters because the *product* here is a binary, not a crate. There
+# is nothing for release-plz to publish and it must never try.
+
+[workspace]
+# Nothing goes to crates.io, ever. The crate's own Cargo.toml says
+# `publish = false` too — that one stops `cargo publish`, this one stops
+# release-plz from reaching for it. Both, because they fail differently: the
+# manifest catches a human, this catches automation.
+publish = false
+
+# release.yml creates the GitHub release, because only it has the built
+# XCFramework and its checksum to attach. A release made here would be an
+# empty one that arrives first and wins the name.
+git_release_enable = false
+
+# Tag on merge, and the shape is not cosmetic: `release.yml` triggers on
+# `v[0-9]+.[0-9]+.[0-9]+`, so a differently-named tag is a release that
+# silently never builds.
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+
+changelog_update = true
+changelog_path = "./CHANGELOG.md"
+
+# Tag only when the release PR merges, never on an ordinary push to main.
+release_always = false
+
+pr_labels = ["release"]
+# Opened as a draft, matching modelpipe: a release PR that appears ready the
+# moment a feature lands invites merging it as a reflex.
+pr_draft = true
+
+# A new feature is a minor bump rather than a patch. This crate is a boundary
+# other code compiles against, so "the API grew" and "a bug was fixed" should
+# not look the same from outside.
+features_always_increment_minor = true

@@ -23,10 +23,33 @@ fi
 
 fail=0
 
+# Apple's platform constants, from <mach-o/loader.h>. `otool -l` prints the
+# NUMBER, not the name — which is the whole reason this table exists. The
+# first version of this script grepped for "IOS" and duly failed a perfectly
+# good build three ways, reporting `platform '2 '` as wrong when 2 is exactly
+# what an iOS slice should say.
+platform_name() {
+    case "$1" in
+        1)  echo "MACOS" ;;
+        2)  echo "IOS" ;;
+        3)  echo "TVOS" ;;
+        4)  echo "WATCHOS" ;;
+        5)  echo "BRIDGEOS" ;;
+        6)  echo "MACCATALYST" ;;
+        7)  echo "IOSSIMULATOR" ;;
+        8)  echo "TVOSSIMULATOR" ;;
+        9)  echo "WATCHOSSIMULATOR" ;;
+        10) echo "DRIVERKIT" ;;
+        # Some toolchains print the name directly. Pass anything
+        # non-numeric through rather than mangling it.
+        *)  echo "$1" ;;
+    esac
+}
+
 # Report a slice, then assert one fact about it.
 #   $1 the library inside the framework
 #   $2 a human name for the slice
-#   $3 the platform string `otool -l` must show
+#   $3 the platform name the slice must carry
 check() {
     local lib="$1" name="$2" want="$3"
 
@@ -40,17 +63,43 @@ check() {
     arches="$(lipo -archs "${lib}")"
 
     # `otool -l` on a static library prints the load commands of every member.
-    # The platform is uniform across them, so one grep answers for the slice.
-    local platforms
-    platforms="$(otool -l "${lib}" 2>/dev/null \
+    # The platform is uniform across them, so one reading answers for the
+    # slice. Every distinct value is resolved to a name and collected, so a
+    # slice that somehow mixed two platforms reports both rather than the
+    # first.
+    local raw names=""
+    for raw in $(otool -l "${lib}" 2>/dev/null \
         | awk '/^ *platform /{print $2}' \
+        | sort -u); do
+        names="${names}$(platform_name "${raw}") "
+    done
+    names="${names% }"
+
+    # The deployment target the slice was actually built with. Reported
+    # always, and failed only on the one value known to be broken: rustc's
+    # apple targets default to iOS 10.0, which cannot resolve
+    # `___chkstk_darwin` and so fails to link against a modern SDK's C
+    # objects. Asserting an exact value here would make this gate fail on
+    # any legitimate bump; asserting against the known-bad default cannot.
+    local minos
+    minos="$(otool -l "${lib}" 2>/dev/null \
+        | awk '/^ *minos /{print $2}' \
         | sort -u \
         | tr '\n' ' ')"
+    minos="${minos% }"
 
-    if [[ "${platforms}" == *"${want}"* ]]; then
-        echo "  ok       ${name}  [${arches}]  platform ${platforms}"
+    if [[ "${minos}" == 10.* ]]; then
+        echo "  WRONG    ${name}  [${arches}]  minos ${minos} is rustc's default, not a chosen floor"
+        fail=1
+    fi
+
+    if [[ -z "${names}" ]]; then
+        echo "  NO DATA  ${name}  [${arches}]  otool reported no platform load command"
+        fail=1
+    elif [[ "${names}" == "${want}" ]]; then
+        echo "  ok       ${name}  [${arches}]  platform ${names}  minos ${minos:-?}"
     else
-        echo "  WRONG    ${name}  [${arches}]  platform '${platforms}', wanted '${want}'"
+        echo "  WRONG    ${name}  [${arches}]  platform '${names}', wanted '${want}'"
         fail=1
     fi
 }
@@ -59,19 +108,25 @@ echo "Checking slices in ${FRAMEWORK}"
 
 check "${FRAMEWORK}/ios-arm64/libmodelpipe_ffi.a" \
     "ios-arm64" "IOS"
-check "${FRAMEWORK}/ios-arm64_x86_64-simulator/libmodelpipe_ffi.a" \
+check "${FRAMEWORK}/ios-arm64-simulator/libmodelpipe_ffi.a" \
     "ios-simulator" "IOSSIMULATOR"
-check "${FRAMEWORK}/macos-arm64_x86_64/libmodelpipe_ffi.a" \
+check "${FRAMEWORK}/macos-arm64/libmodelpipe_ffi.a" \
     "macos" "MACOS"
 
-# The device slice is the one a mistake is most expensive in, so its
-# architecture is asserted too: an arm64e or x86_64 device slice would install
-# and then fail to launch.
-device="${FRAMEWORK}/ios-arm64/libmodelpipe_ffi.a"
-if [[ -f "${device}" ]] && [[ "$(lipo -archs "${device}")" != "arm64" ]]; then
-    echo "  WRONG    ios-arm64 carries $(lipo -archs "${device}"), wanted exactly arm64"
-    fail=1
-fi
+# Every bundle is single-architecture now that the x86_64 targets are gone, so
+# each one is asserted to carry exactly `arm64` and nothing else. A fat slice
+# reappearing here means a target crept back into the build without the
+# framework layout being updated to match — which `-create-xcframework` would
+# accept silently, renaming the bundle underneath the checks above.
+for slice in ios-arm64 ios-arm64-simulator macos-arm64; do
+    lib="${FRAMEWORK}/${slice}/libmodelpipe_ffi.a"
+    [[ -f "${lib}" ]] || continue
+    archs="$(lipo -archs "${lib}")"
+    if [[ "${archs}" != "arm64" ]]; then
+        echo "  WRONG    ${slice} carries '${archs}', wanted exactly arm64"
+        fail=1
+    fi
+done
 
 if [[ "${fail}" -ne 0 ]]; then
     echo

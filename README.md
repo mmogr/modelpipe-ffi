@@ -66,7 +66,30 @@ That is a gate, not a promise: `scripts/check_no_credentials.sh` fails the
 build if an exported function grows a credential-shaped parameter, or if
 anything formats a ticket or a token into output.
 
-### Status is polled, not streamed
+### Releasing
+
+[release-plz](https://release-plz.dev) maintains a release PR on every push to
+`main` — the version bump and the CHANGELOG entry, read off the conventional
+commits since the last tag. Merging that PR *is* the decision to release: it
+pushes `vX.Y.Z`, which triggers `release.yml` to build the XCFramework
+optimised, run the Swift smoke test against the artifact it is about to
+publish, and attach the zip with its SwiftPM checksum in the notes.
+
+Nothing is published to crates.io. The product here is a binary, so
+`publish = false` appears twice — in `Cargo.toml` to stop a human, and in
+`release-plz.toml` to stop the automation.
+
+Two things worth knowing:
+
+- **The first tag is manual.** release-plz derives the current version from
+  the previous tag and there is none yet, so `v0.1.0` is tagged once by hand
+  (`git tag v0.1.0 && git push origin v0.1.0`). Everything after is automatic.
+- **It needs a `RELEASE_PAT` secret** — a fine-grained PAT scoped to this
+  repository, Contents and Pull requests read/write. Not a preference: events
+  created with the default `GITHUB_TOKEN` trigger no workflows, so the release
+  PR would get no CI and the tag would never start `release.yml`.
+
+## Status is polled, not streamed
 
 There is no callback across the boundary. Rebuild it as an `AsyncStream` on
 the Swift side:
@@ -103,31 +126,92 @@ make xcframework   # the five slices and the framework (macOS, needs Xcode)
 make checksum      # zip it and print the SwiftPM checksum
 ```
 
-`make xcframework` produces three bundles covering five slices:
+`make xcframework` produces three bundles, one architecture each:
 
-| Bundle | Architectures |
+| Bundle | Architecture |
 |---|---|
 | `ios-arm64` | iPhone |
-| `ios-arm64_x86_64-simulator` | Simulator on Apple silicon and Intel |
-| `macos-arm64_x86_64` | The Mac app |
+| `ios-arm64-simulator` | Simulator on Apple silicon |
+| `macos-arm64` | The Mac app |
+
+**Apple silicon only.** The two x86_64 targets were dropped deliberately —
+they serve an Intel Mac running the simulator and an Intel Mac app, neither of
+which this ships to. A consumer must agree: Xcode's Release configuration
+leaves `ONLY_ACTIVE_ARCH` at its default `NO` and so asks for every standard
+architecture unless `ARCHS` says otherwise.
 
 Every build then asserts each slice carries the platform load command it
-claims (`scripts/check-slices.sh`). That check exists because a cross-compile
-which silently produces host objects succeeds everywhere else and fails at
-link time in the consuming app, days later and to someone who did not build
-it.
+claims, a deployment floor that is not rustc's broken default, and exactly one
+architecture (`scripts/check-slices.sh`). Those checks exist because a
+cross-compile which silently produces host objects succeeds everywhere else
+and fails at link time in the consuming app, days later and to someone who did
+not build it.
 
 ## Consuming it
 
-Add the XCFramework from a release as a `binaryTarget`:
+Add the XCFramework from a release as a `binaryTarget`, **and declare the
+system frameworks it needs**:
 
 ```swift
 .binaryTarget(
     name: "ModelpipeFFI",
     url: "https://github.com/mmogr/modelpipe-ffi/releases/download/vX.Y.Z/ModelpipeFFI.xcframework.zip",
     checksum: "<the checksum in the release notes>"
+),
+.target(
+    name: "YourTarget",
+    dependencies: ["ModelpipeFFI"],
+    linkerSettings: [
+        .linkedFramework("SystemConfiguration"),  // iroh: interfaces, reachability
+        .linkedFramework("Security"),             // the Apple trust store
+        .linkedFramework("Network"),
+        .linkedFramework("CoreFoundation"),
+        .linkedFramework("Foundation"),
+        .linkedLibrary("objc"),
+        .linkedLibrary("iconv"),
+    ]
 )
 ```
+
+**The linker settings are not optional.** A static library does not carry its
+own dependencies: when rustc links a binary it passes those frameworks itself,
+but a `.a` handed to someone else records only that it *references* the
+symbols, not where they live. Leave them out and everything compiles, right up
+to the last step:
+
+```
+__RNvMs_...system_configuration...SCNetworkInterfaceType13from_cfstring
+    in libmodelpipe_ffi.a[arm64]
+ld: symbol(s) not found for architecture arm64
+```
+
+The list is read off rustc's own link invocation for the iOS target, minus the
+ones SwiftPM already passes (`System`, `c`, `m`). `scripts/swift-smoke.sh`
+builds a package with exactly these settings on every CI run, so the
+instructions above are executed rather than merely written down.
+
+## Releasing
+
+[release-plz](https://release-plz.dev) maintains a release PR on every push to
+`main` — the version bump and the CHANGELOG entry, read off the conventional
+commits since the last tag. Merging that PR *is* the decision to release: it
+pushes `vX.Y.Z`, which triggers `release.yml` to build the XCFramework
+optimised, run the Swift smoke test against the artifact it is about to
+publish, and attach the zip with its SwiftPM checksum in the notes.
+
+Nothing is published to crates.io. The product here is a binary, so
+`publish = false` appears twice — in `Cargo.toml` to stop a human, and in
+`release-plz.toml` to stop the automation.
+
+Two things worth knowing:
+
+- **The first tag is manual.** release-plz derives the current version from
+  the previous tag and there is none yet, so `v0.1.0` is tagged once by hand
+  (`git tag v0.1.0 && git push origin v0.1.0`). Everything after is automatic.
+- **It needs a `RELEASE_PAT` secret** — a fine-grained PAT scoped to this
+  repository, Contents and Pull requests read/write. Not a preference: events
+  created with the default `GITHUB_TOKEN` trigger no workflows, so the release
+  PR would get no CI and the tag would never start `release.yml`.
 
 ## Status
 

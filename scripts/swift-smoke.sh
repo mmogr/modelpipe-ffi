@@ -48,6 +48,20 @@ import PackageDescription
 // Matches the consuming app's settings on the two that matter: Swift 6
 // language mode and complete strict concurrency. Generated code that is not
 // `Sendable`-clean fails here rather than in ggchat.
+//
+// THE LINKER SETTINGS ARE NOT OPTIONAL, AND ggchat WILL NEED THE SAME ONES.
+//
+// A static library does not carry its own dependencies. When rustc links a
+// binary it passes the system frameworks itself; a `.a` handed to someone
+// else records that it *references* those symbols and nothing about where
+// they live. Omit them and the build gets all the way to the last step:
+//
+//     __RNvMs_...system_configuration...SCNetworkInterfaceType13from_cfstring
+//         in libmodelpipe_ffi.a[arm64]
+//     ld: symbol(s) not found for architecture arm64
+//
+// This list is read off rustc's own link invocation for the iOS target, minus
+// the ones SwiftPM already passes (System, c, m).
 let package = Package(
     name: "Smoke",
     platforms: [.macOS(.v14)],
@@ -55,7 +69,20 @@ let package = Package(
         .binaryTarget(name: "ModelpipeFFI", path: "ModelpipeFFI.xcframework"),
         .executableTarget(
             name: "Smoke",
-            dependencies: ["ModelpipeFFI"]
+            dependencies: ["ModelpipeFFI"],
+            linkerSettings: [
+                // iroh's transport: interface enumeration and reachability.
+                .linkedFramework("SystemConfiguration"),
+                // rustls-platform-verifier, via security-framework — the
+                // Apple trust store, which is why there is no bundled CA set.
+                .linkedFramework("Security"),
+                .linkedFramework("Network"),
+                .linkedFramework("CoreFoundation"),
+                .linkedFramework("Foundation"),
+                // objc2's runtime calls, and iconv from the C dependencies.
+                .linkedLibrary("objc"),
+                .linkedLibrary("iconv"),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]
@@ -89,7 +116,7 @@ do {
 // 2. A real dial binds, and the sync accessors return.
 let pipe = try await mpConnect(
     ticket: ticket,
-    options: MpConnectOptions(discovery: false, portMapping: false)
+    options: MpConnectOptions(portMapping: false, discovery: false)
 )
 
 let base = pipe.baseUrl()
@@ -123,7 +150,7 @@ guard pipe.status() == .closed else {
 print("ok  async shutdown returned and the pipe is closed")
 
 // 4. The status sequence terminates rather than repeating a terminal value.
-let next = await pipe.statusChangedSince(snapshot: .closed)
+let next = await pipe.statusChangedSince(snapshot: MpPipeStatus.closed)
 guard next == nil else {
     fail("the status sequence did not end after a close, got \(String(describing: next))")
 }
@@ -136,4 +163,35 @@ cp -R "${FRAMEWORK}" "${WORK_DIR}/ModelpipeFFI.xcframework"
 
 echo "==> Building and running the smoke executable"
 cd "${WORK_DIR}"
+
+# Bounded, and the bound is the point rather than caution.
+#
+# Every check below is either immediate or fails fast; nothing here waits on a
+# network. So the one way this runs long is the failure the script exists to
+# find — an async call that never returns because the library's tokio runtime
+# was never started. Left unbounded that is indistinguishable from a slow
+# runner until the job hits its own ceiling with no clue why.
+#
+# `timeout` exits 124 on expiry, which is caught here so the log names the
+# behaviour instead of leaving a bare non-zero to interpret. The last `ok`
+# line printed before this says which call hung.
+#
+# Not available as `timeout` on macOS without coreutils, so fall back to
+# running unbounded rather than failing a build over a missing tool — the job
+# ceiling still catches it.
+if command -v timeout >/dev/null 2>&1; then
+    if timeout 300 swift run Smoke; then
+        exit 0
+    fi
+    status=$?
+    if [[ "${status}" -eq 124 ]]; then
+        echo "error: the smoke executable did not finish within 300s." >&2
+        echo "       Nothing here waits on a network, so this is a call that" >&2
+        echo "       never returned. The last 'ok' line above names the one" >&2
+        echo "       before it." >&2
+    fi
+    exit "${status}"
+fi
+
+echo "note: no \`timeout\` on this machine; the job ceiling is the only bound."
 swift run Smoke
