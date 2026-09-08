@@ -119,15 +119,46 @@ it.
 
 ## Consuming it
 
-Add the XCFramework from a release as a `binaryTarget`:
+Add the XCFramework from a release as a `binaryTarget`, **and declare the
+system frameworks it needs**:
 
 ```swift
 .binaryTarget(
     name: "ModelpipeFFI",
     url: "https://github.com/mmogr/modelpipe-ffi/releases/download/vX.Y.Z/ModelpipeFFI.xcframework.zip",
     checksum: "<the checksum in the release notes>"
+),
+.target(
+    name: "YourTarget",
+    dependencies: ["ModelpipeFFI"],
+    linkerSettings: [
+        .linkedFramework("SystemConfiguration"),  // iroh: interfaces, reachability
+        .linkedFramework("Security"),             // the Apple trust store
+        .linkedFramework("Network"),
+        .linkedFramework("CoreFoundation"),
+        .linkedFramework("Foundation"),
+        .linkedLibrary("objc"),
+        .linkedLibrary("iconv"),
+    ]
 )
 ```
+
+**The linker settings are not optional.** A static library does not carry its
+own dependencies: when rustc links a binary it passes those frameworks itself,
+but a `.a` handed to someone else records only that it *references* the
+symbols, not where they live. Leave them out and everything compiles, right up
+to the last step:
+
+```
+__RNvMs_...system_configuration...SCNetworkInterfaceType13from_cfstring
+    in libmodelpipe_ffi.a[arm64]
+ld: symbol(s) not found for architecture arm64
+```
+
+The list is read off rustc's own link invocation for the iOS target, minus the
+ones SwiftPM already passes (`System`, `c`, `m`). `scripts/swift-smoke.sh`
+builds a package with exactly these settings on every CI run, so the
+instructions above are executed rather than merely written down.
 
 ## Status
 

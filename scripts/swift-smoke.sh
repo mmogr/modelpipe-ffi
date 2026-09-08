@@ -48,6 +48,20 @@ import PackageDescription
 // Matches the consuming app's settings on the two that matter: Swift 6
 // language mode and complete strict concurrency. Generated code that is not
 // `Sendable`-clean fails here rather than in ggchat.
+//
+// THE LINKER SETTINGS ARE NOT OPTIONAL, AND ggchat WILL NEED THE SAME ONES.
+//
+// A static library does not carry its own dependencies. When rustc links a
+// binary it passes the system frameworks itself; a `.a` handed to someone
+// else records that it *references* those symbols and nothing about where
+// they live. Omit them and the build gets all the way to the last step:
+//
+//     __RNvMs_...system_configuration...SCNetworkInterfaceType13from_cfstring
+//         in libmodelpipe_ffi.a[arm64]
+//     ld: symbol(s) not found for architecture arm64
+//
+// This list is read off rustc's own link invocation for the iOS target, minus
+// the ones SwiftPM already passes (System, c, m).
 let package = Package(
     name: "Smoke",
     platforms: [.macOS(.v14)],
@@ -55,7 +69,20 @@ let package = Package(
         .binaryTarget(name: "ModelpipeFFI", path: "ModelpipeFFI.xcframework"),
         .executableTarget(
             name: "Smoke",
-            dependencies: ["ModelpipeFFI"]
+            dependencies: ["ModelpipeFFI"],
+            linkerSettings: [
+                // iroh's transport: interface enumeration and reachability.
+                .linkedFramework("SystemConfiguration"),
+                // rustls-platform-verifier, via security-framework — the
+                // Apple trust store, which is why there is no bundled CA set.
+                .linkedFramework("Security"),
+                .linkedFramework("Network"),
+                .linkedFramework("CoreFoundation"),
+                .linkedFramework("Foundation"),
+                // objc2's runtime calls, and iconv from the C dependencies.
+                .linkedLibrary("objc"),
+                .linkedLibrary("iconv"),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]
