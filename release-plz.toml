@@ -42,6 +42,19 @@ git_release_enable = false
 # version. And the shape is still load-bearing — `release.yml` triggers on
 # `build/v[0-9]+.[0-9]+.[0-9]+`, so a differently-named tag is a release that
 # silently never builds.
+#
+# ONE-TIME BOOTSTRAP, recorded because it looks arbitrary otherwise.
+# release-plz works out what was last released by reading tags that match this
+# pattern. Renaming the pattern emptied that namespace: `v0.1.0` no longer
+# matched, so release-plz concluded nothing had ever been released, found the
+# manifest already saying 0.1.0, and had nothing to propose — it opened no PR
+# at all. The namespace is only ever populated by release-plz, so it could not
+# populate it.
+#
+# Broken by tagging `build/v0.1.0` at v0.1.0's own commit, which is a true
+# record: v0.1.0 really was built from there. release.yml stops immediately on
+# a tag whose release already exists, so that tag costs one skipped run and
+# nothing else.
 git_tag_enable = true
 git_tag_name = "build/v{{ version }}"
 
