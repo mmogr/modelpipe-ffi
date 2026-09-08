@@ -89,7 +89,7 @@ do {
 // 2. A real dial binds, and the sync accessors return.
 let pipe = try await mpConnect(
     ticket: ticket,
-    options: MpConnectOptions(discovery: false, portMapping: false)
+    options: MpConnectOptions(portMapping: false, discovery: false)
 )
 
 let base = pipe.baseUrl()
@@ -123,7 +123,7 @@ guard pipe.status() == .closed else {
 print("ok  async shutdown returned and the pipe is closed")
 
 // 4. The status sequence terminates rather than repeating a terminal value.
-let next = await pipe.statusChangedSince(snapshot: .closed)
+let next = await pipe.statusChangedSince(snapshot: MpPipeStatus.closed)
 guard next == nil else {
     fail("the status sequence did not end after a close, got \(String(describing: next))")
 }
