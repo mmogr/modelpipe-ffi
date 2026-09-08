@@ -4,7 +4,7 @@ import PackageDescription
 
 // This crate is `publish = false` and always will be: the product is an Apple
 // binary artifact, not a source tarball. THIS is how it is consumed —
-// `.package(url: "https://github.com/mmogr/modelpipe-ffi.git", from: "0.1.1")`
+// `.package(url: "https://github.com/mmogr/modelpipe-ffi.git", from: "0.1.2")`
 // — and the two halves below are why the package exists at all rather than a
 // pair of release assets a consumer assembles by hand.
 //

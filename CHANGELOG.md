@@ -11,9 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The first published release of the SwiftPM package. 0.1.1 was prepared and then
 abandoned unreleased: its build tag pointed at a commit whose release workflow
-carried a shell quoting bug, and moving a tag is a non-fast-forward ref update,
-which this repository's egress policy refuses. Nothing was ever published under
-that number, so it is folded into this one rather than left as a gap.
+carried a shell quoting bug, and the session that would have moved the tag ran
+behind a sandbox egress policy that refused ref updates with a 403. That policy
+is external to GitHub — this repository has never carried tag protection, and
+the tag for this release was pushed without incident from a terminal outside
+that sandbox. Nothing was ever published under 0.1.1, so it is folded into this
+one rather than left as a gap.
 
 ### Fixed
 
