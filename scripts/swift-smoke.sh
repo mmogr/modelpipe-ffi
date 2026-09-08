@@ -64,7 +64,18 @@ import PackageDescription
 // the ones SwiftPM already passes (System, c, m).
 let package = Package(
     name: "Smoke",
-    platforms: [.macOS(.v14)],
+    // 26, matching both the framework's deployment floor and ggchat's own
+    // `platforms: [.iOS(.v26), .macOS(.v26)]`. At 14 this still linked, and
+    // said so about eight hundred times:
+    //
+    //     ld: warning: object file (libmodelpipe_ffi.a[790](...rcgu.o)) was
+    //         built for newer 'macOS' version (26.0) than being linked (14.0)
+    //
+    // Warnings rather than errors, so nothing failed — but the comment below
+    // claims this package matches the consuming app, and a floor twelve
+    // versions under it did not. A smoke test whose configuration nobody
+    // ships is testing something nobody ships.
+    platforms: [.macOS(.v26)],
     targets: [
         .binaryTarget(name: "ModelpipeFFI", path: "ModelpipeFFI.xcframework"),
         .executableTarget(
