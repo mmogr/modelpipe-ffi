@@ -1,0 +1,83 @@
+# The on-device spike, as an Xcode project.
+#
+# This is not ggchat and is not meant to become it. It exists to answer the
+# questions no simulator and no CI runner can:
+#
+#   1. Does iroh hole-punch from a phone behind carrier-grade NAT at all?
+#   2. Do portmapper / igd-next / netdev / hickory-resolver work under iOS
+#      entitlements, or does one of them fail silently?
+#   3. Does a tokio runtime survive an iOS process suspension, or does the
+#      pipe come back dead in a way that looks like a network problem?
+#   4. What is the RTT, and is the path `direct` or `relayed`?
+#
+# Generate and open with `make spike` from the repository root, which builds
+# the XCFramework first because this links it directly.
+name: ModelpipeSpike
+options:
+  bundleIdPrefix: com.mattogrady
+  deploymentTarget:
+    # Matches the framework's floor. A lower number here fails to link against
+    # slices built for 26.0.
+    iOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # Apple silicon only, matching the three slices the framework ships. Left
+    # at Xcode's default, a Release build asks for x86_64 and fails to find a
+    # slice for it.
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: YES
+    SWIFT_VERSION: "6.0"
+    # Deliberately NOT `complete` here, unlike ggchat. This is a throwaway
+    # whose job is to answer a network question; a strict-concurrency fight
+    # with generated code is not the thing being measured. ggchat compiles the
+    # same binding under `complete`, and the CI smoke test proves it does.
+    SWIFT_STRICT_CONCURRENCY: minimal
+    # Set this to your team, or set it in Xcode's Signing & Capabilities tab.
+    # A free personal Apple ID team works and gives a 7-day build, which is
+    # all this needs — the paid programme is not required.
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  ModelpipeSpike:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      # The generated binding, taken straight from the build rather than
+      # copied in, so the spike can never test a stale API shape.
+      - path: ../generated/modelpipe_ffi.swift
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Pipe Spike
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Needed the moment a dial tries a LAN address, which it will when the
+        # phone is on wifi. On cellular it is not exercised — but the prompt
+        # appearing at all is itself a useful signal about what iroh reached
+        # for, so it is declared rather than avoided.
+        NSLocalNetworkUsageDescription: >-
+          Finding your computer on this network to open a direct connection to it.
+        # Nothing here is exempt-encryption-relevant, but declaring it stops
+        # Xcode asking on every build.
+        ITSAppUsesNonExemptEncryption: false
+    dependencies:
+      # The framework itself. `embed: false` because it is a static library:
+      # there is nothing to embed, and asking Xcode to embed one produces a
+      # confusing failure rather than a clear refusal.
+      - framework: ../build/ModelpipeFFI.xcframework
+        embed: false
+      # The seven the static library needs, and does not carry. Same list as
+      # the README's SwiftPM snippet and the CI smoke test, in xcodegen's
+      # spelling. Omit any one and everything compiles, then fails at link.
+      - sdk: SystemConfiguration.framework
+      - sdk: Security.framework
+      - sdk: Network.framework
+      - sdk: CoreFoundation.framework
+      - sdk: Foundation.framework
+      - sdk: libobjc.tbd
+      - sdk: libiconv.tbd

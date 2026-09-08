@@ -49,3 +49,9 @@ desktop.ini
 
 # Swift package build output from the consuming smoke test
 .build/
+
+# The spike's generated Xcode project. `make spike` regenerates it from
+# spike/project.yml, which is the tracked source of truth — the same
+# arrangement ggchat uses.
+spike/*.xcodeproj
+spike/Info.plist
