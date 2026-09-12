@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.1.2...build/v0.1.3) - 2026-09-12
+
+### Fixed
+
+- *(release)* a stalled download fails in minutes, not hours ([#12](https://github.com/mmogr/modelpipe-ffi/pull/12))
+
+### Other
+
+- *(deps)* build against modelpipe 0.5, the crate the serving side runs ([#14](https://github.com/mmogr/modelpipe-ffi/pull/14))
+- *(deps)* bump release-plz/action from 0.5.131 to 0.5.133 ([#13](https://github.com/mmogr/modelpipe-ffi/pull/13))
+- *(readme)* the install snippet names a version that exists ([#11](https://github.com/mmogr/modelpipe-ffi/pull/11))
+- *(release)* pin the v0.1.2 XCFramework checksum
+
 ## [0.1.2](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.1.0...build/v0.1.2) - 2026-09-08
 
 The first published release of the SwiftPM package. 0.1.1 was prepared and then
