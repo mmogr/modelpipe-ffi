@@ -1,6 +1,6 @@
 [package]
 name = "modelpipe-ffi"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 # The honest floor, inherited from the crate this binds: the iroh stack
 # declares rust-version 1.91, and nothing here can promise a build modelpipe
