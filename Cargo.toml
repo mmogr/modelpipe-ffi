@@ -33,10 +33,13 @@ name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
 [dependencies]
-# The whole point. 0.4 is the floor, not a preference: `status_changed_since`,
-# `notify_network_change` and `network_metrics` landed in it (modelpipe #51),
-# and the first of those is the accessor a language binding is supposed to use.
-modelpipe = "0.4"
+# The whole point. The floor is the modelpipe the serving side runs: gglib
+# 0.18.0 serves on 0.5, and the connect half this crate binds is the same file
+# in 0.4.0 and 0.5.0, so 0.5 here matches the far end rather than adding
+# anything. 0.4 was the first with `status_changed_since`,
+# `notify_network_change` and `network_metrics` (modelpipe #51), and the first
+# of those is the accessor a language binding is supposed to use.
+modelpipe = "0.5"
 uniffi = { version = "0.32", features = ["tokio", "cli"] }
 # Multi-thread, because modelpipe's futures are all Send (its own
 # `future_promises` pins that) and the pipe should not stall on one worker.
