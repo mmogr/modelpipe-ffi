@@ -53,19 +53,33 @@ and nothing on an iPhone wants to be a backend.
 | `pipe.notifyNetworkChange()` | Call on every app resume. See below. |
 | `pipe.networkMetrics()` | Relay counters, including rate limiting. |
 | `pipe.shutdown()` | Idempotent and terminal. |
+| `pipe.waitReachable(withinMs:)` | Waits until the far machine is reached and says how it is routed, or throws `MpUnreached`; a timeout tears nothing down. |
+| `pipe.peerId()` | Who this device connects as: sixty-four hex characters, stable across launches when `identityPath` is set. |
+| `mpPair(pairing:label:options:reachWithinMs:)` | Dial, wait to reach the far machine, redeem the code, and return `MpPaired`: the pipe still up, this device's key, the name it is held under, and the far machine's id. The key is returned once and never kept here. |
+| `MpConnectOptions.identityPath` | Where this device keeps its endpoint key, so the far machine sees the same device every time. `nil` mints one per process. |
 | `pipe.watch()` | A cancellable wait on the status sequence: `watch.next(snapshot:)` answers like `statusChangedSince`, and `watch.cancel()` ends it, before or during the wait. |
 
-### No credential crosses this boundary
+### No credential is accepted across this boundary
 
 `mpConnect` takes **no token**, because `modelpipe::connect` takes none either.
 The connecting side is a plain local HTTP listener that forwards
 `Authorization` verbatim; the serve edge is the only thing that checks it. So
 the bearer token belongs to whatever HTTP client you point at `baseUrl()`, and
-this library never sees, stores or logs one.
+this library never stores or logs one.
+
+One credential is **returned**, once: `mpPair` hands back the device key the
+far machine minted, as `MpPaired.apiKey`, and this library does not keep it.
+Its Rust `Debug` and its Swift `description` and `debugDescription` render the
+key redacted (the Swift ones are a hand-written extension beside the generated
+file, pinned by the smoke test). `Mirror`, `dump()` and a direct read of
+`apiKey` are not covered: the value is a plain `String` the app owns from the
+moment `mpPair` returns. The pairing code arrives inside the pairing string and
+no error renders it.
 
 That is a gate, not a promise: `scripts/check_no_credentials.sh` fails the
 build if an exported function grows a credential-shaped parameter, or if
-anything formats a ticket or a token into output.
+anything formats a ticket or a token into output. `mpPair` passes it
+unchanged: a returned field is neither.
 
 ## Status is polled, not streamed
 
@@ -263,7 +277,8 @@ Two things worth knowing:
 ## Status
 
 Early. The crate builds, its suite passes against real loopback sockets, and
-the generated Swift has the shape ggchat's FFI seam specifies. What has **not**
+the generated Swift has the shape ggchat's FFI seam specifies, plus pairing, a
+lasting identity and a cancellable watch, which ggchat does not use yet. What has **not**
 happened yet is the measurement that matters: a build on a physical iPhone,
 on a carrier network, dialling a desktop. Compiling is not running —
 `portmapper`, `igd-next`, `netdev` and `hickory-resolver` all want entitlements

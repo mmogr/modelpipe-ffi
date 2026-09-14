@@ -8,6 +8,7 @@ use modelpipe::{ConnectHandle, Ticket};
 
 use crate::error::MpError;
 use crate::options::MpConnectOptions;
+use crate::pair_error::MpUnreached;
 use crate::runtime::runtime;
 use crate::status::{MpCloseReason, MpNetworkMetrics, MpPipeStatus};
 use crate::watch::MpWatch;
@@ -76,6 +77,27 @@ impl MpPipe {
     /// `Task` cannot cancel across the boundary, as an object it can.
     pub fn watch(&self) -> Arc<MpWatch> {
         Arc::new(MpWatch::new(Arc::clone(&self.handle)))
+    }
+
+    /// Wait until this device has reached the far machine, for at most
+    /// `within_ms`, and say how it is routed.
+    ///
+    /// # Errors
+    ///
+    /// [`MpUnreached`] when the wait runs out or the pipe closes first. On a
+    /// timeout the pipe keeps looking; nothing is torn down.
+    pub async fn wait_reachable(&self, within_ms: u64) -> Result<MpPipeStatus, MpUnreached> {
+        self.handle
+            .wait_reachable(Duration::from_millis(within_ms))
+            .await
+            .map(Into::into)
+            .map_err(Into::into)
+    }
+
+    /// Who this device connects as: its endpoint id, sixty-four hex
+    /// characters, stable across launches when `identityPath` is set.
+    pub fn peer_id(&self) -> String {
+        self.handle.peer_id().to_string()
     }
 
     /// `http://127.0.0.1:<port>/v1` — point an OpenAI-compatible client here,

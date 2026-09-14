@@ -50,6 +50,16 @@ pub struct MpConnectOptions {
     /// which is otherwise hard to force.
     #[uniffi(default = false)]
     pub relay_only: bool,
+
+    /// Where this device keeps its endpoint key, so the far machine sees the
+    /// same device every time. `None` mints a fresh one per process.
+    ///
+    /// Written readable only by this user and refused when others can read
+    /// it, as modelpipe's own serve side does with its key; on Windows the
+    /// directory is the only protection. Appended last: `UniFFI` emits the
+    /// Swift memberwise initialiser in declaration order.
+    #[uniffi(default = None)]
+    pub identity_path: Option<String>,
 }
 
 impl Default for MpConnectOptions {
@@ -60,6 +70,7 @@ impl Default for MpConnectOptions {
             port_mapping: true,
             discovery: true,
             relay_only: false,
+            identity_path: None,
         }
     }
 }
@@ -80,6 +91,7 @@ impl MpConnectOptions {
         opts.port_mapping = self.port_mapping;
         opts.discovery = self.discovery;
         opts.relay_only = self.relay_only;
+        opts.identity = self.identity_path.as_ref().map(std::path::PathBuf::from);
         opts
     }
 }

@@ -28,6 +28,9 @@ fn no_error_renders_the_ticket() {
             url: "not a url".to_owned(),
         },
         MpError::PeerUnreachable,
+        MpError::Identity {
+            path: "/tmp/k".to_owned(),
+        },
         MpError::Unknown {
             detail: "NewVariant".to_owned(),
         },
@@ -63,6 +66,9 @@ fn every_error_is_a_sentence() {
             url: "nope".to_owned(),
         },
         MpError::PeerUnreachable,
+        MpError::Identity {
+            path: "/tmp/k".to_owned(),
+        },
         MpError::Unknown {
             detail: "NewVariant".to_owned(),
         },
@@ -195,6 +201,9 @@ fn message_is_the_sentence_and_not_a_rendering_of_the_variant() {
             reason: "address in use".to_owned(),
         },
         MpError::PeerUnreachable,
+        MpError::Identity {
+            path: "/tmp/k".to_owned(),
+        },
         MpError::Unknown {
             detail: "something new".to_owned(),
         },
@@ -213,4 +222,15 @@ fn message_is_the_sentence_and_not_a_rendering_of_the_variant() {
             );
         }
     }
+}
+
+/// An identity file that cannot be used is the caller's path to fix: named,
+/// and not worth dialling again as it is.
+#[test]
+fn an_unusable_identity_is_permanent_and_names_the_path() {
+    let error = MpError::Identity {
+        path: "/tmp/k".to_owned(),
+    };
+    assert!(!error.is_retryable());
+    assert!(error.message().contains("/tmp/k"), "{}", error.message());
 }
