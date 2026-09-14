@@ -51,18 +51,6 @@ pub(crate) fn runtime() -> &'static Runtime {
     })
 }
 
-/// Run a future to completion on the library's runtime, from a thread that is
-/// not already inside it.
-///
-/// Used only by the synchronous accessors, which are cheap reads that happen
-/// to sit behind an async upstream method. Never used for `connect` or for
-/// waiting on a status change — those are `async` all the way to Swift, and
-/// blocking a caller's thread on them is exactly the behaviour that would make
-/// the app's main actor stutter.
-pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
-    runtime().block_on(future)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,6 +71,6 @@ mod tests {
     /// It can actually run something, which the `OnceLock` alone does not say.
     #[test]
     fn the_runtime_runs_a_future() {
-        assert_eq!(block_on(async { 2 + 2 }), 4);
+        assert_eq!(runtime().block_on(async { 2 + 2 }), 4);
     }
 }

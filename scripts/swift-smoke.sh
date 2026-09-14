@@ -175,6 +175,24 @@ print("ok  metrics read: \(metrics.relayConnections) opened, "
 await pipe.notifyNetworkChange()
 print("ok  async notifyNetworkChange returned")
 
+// 3b. A watch ends its wait when cancelled: the cancellation the generated
+//     Swift cannot express for statusChangedSince, as an object the app holds.
+let watch = pipe.watch()
+let waiting = Task { await watch.next(snapshot: MpPipeStatus.idle) }
+try? await Task.sleep(nanoseconds: 50_000_000)
+guard !watch.isCancelled() else {
+    fail("a fresh watch reports itself cancelled")
+}
+watch.cancel()
+guard watch.isCancelled() else {
+    fail("cancel did not take")
+}
+let cancelled = await waiting.value
+guard cancelled == nil else {
+    fail("a cancelled watch answered \(String(describing: cancelled))")
+}
+print("ok  a cancelled watch returns")
+
 await pipe.shutdown()
 guard pipe.status() == .closed else {
     fail("shutdown did not close the pipe")

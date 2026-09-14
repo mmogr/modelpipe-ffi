@@ -44,6 +44,10 @@ uniffi = { version = "0.32", features = ["tokio", "cli"] }
 # Multi-thread, because modelpipe's futures are all Send (its own
 # `future_promises` pins that) and the pipe should not stall on one worker.
 tokio = { version = "1", features = ["rt-multi-thread"] }
+# For the watch's cancellation token: stored state, so a cancel that lands
+# between a check and a wait registration is never lost. Already in the
+# lock, pulled in underneath modelpipe by iroh.
+tokio-util = "0.7"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
