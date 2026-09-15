@@ -252,9 +252,17 @@ checksum matches, the binding compiles against it, and all seven linker settings
 reach a consumer that declares none. Everything before it tests the repository;
 this tests the release.
 
-Nothing is published to crates.io. The product here is a binary, so
-`publish = false` appears twice — in `Cargo.toml` to stop a human, and in
-`release-plz.toml` to stop the automation.
+Nothing is published to crates.io. The product here is a binary, so there
+are two guards: `release-plz.toml` says `publish = false`, which stops the
+automation, and `Cargo.toml` says `publish = ["nowhere"]`, a registry
+allow-list naming no registry that exists, which stops a human's
+`cargo publish` before it uploads anything. The manifest deliberately does not
+say `false`: release-plz's `release` command ignores a package whose manifest
+says it can be published nowhere, and while it did, merging a release PR never
+pushed the build tag: every tag up to `build/v0.1.4` was pushed by hand, and
+`build/v0.2.0` is too, because its merge commit carries the old manifest
+([#21](https://github.com/mmogr/modelpipe-ffi/issues/21)). Never configure a
+registry named `nowhere`; cargo selects the only allowed registry by itself.
 
 Two things worth knowing:
 

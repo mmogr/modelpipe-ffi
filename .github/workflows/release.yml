@@ -14,10 +14,11 @@
 # strips at most one leading `v` and cannot parse it, so it never appears as a
 # package version.
 #
-# Nothing here publishes to crates.io. The crate carries `publish = false` and
-# always will: it is an Apple-platform build artifact, and a source tarball on
-# a registry would be a download nobody can use. The release *asset* is the
-# product, and its checksum is what the consuming app pins.
+# Nothing here publishes to crates.io. release-plz.toml says `publish = false`
+# and the crate's manifest allows no registry that exists, and always will: it
+# is an Apple-platform build artifact, and a source tarball on a registry would
+# be a download nobody can use. The release *asset* is the product, and its
+# checksum is what the consuming app pins.
 name: Release
 
 on:

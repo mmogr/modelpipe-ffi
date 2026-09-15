@@ -1,8 +1,13 @@
 # release-plz (https://release-plz.dev): on every push to main it maintains a
 # release PR — version bump plus CHANGELOG.md — and when that PR merges it
-# pushes the vX.Y.Z tag. It never publishes anything: release-plz.toml sets
-# publish = false, so the tag is where its job ends and release.yml (verify →
-# build the XCFramework → attach it with its checksum) takes over.
+# pushes the `build/vX.Y.Z` tag. It never publishes anything: release-plz.toml
+# sets publish = false, so the tag is where its job ends and release.yml
+# (verify → build the XCFramework → attach it with its checksum) takes over.
+#
+# The tag step depends on Cargo.toml's `publish` being a registry list rather
+# than `false`: `release-plz release` skips a package whose manifest says it
+# can be published nowhere, and did so on every release-PR merge up to 0.2.0,
+# logging "nothing to release" (#21).
 #
 # Both jobs authenticate with RELEASE_PAT — a fine-grained PAT (this repo
 # only; Contents and Pull requests, read/write) — rather than the default

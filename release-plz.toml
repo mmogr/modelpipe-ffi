@@ -34,10 +34,13 @@
 # this is legal, and the two say different things worth saying separately.
 git_only = true
 
-# Nothing goes to crates.io, ever. The crate's own Cargo.toml says
-# `publish = false` too — that one stops `cargo publish`, this one stops
-# release-plz from reaching for it. Both, because they fail differently: the
-# manifest catches a human, this catches automation.
+# Nothing goes to crates.io, ever. This is the switch that stops release-plz
+# from running `cargo publish`; with `git_only` above it sends `release`
+# straight to the tagging path. The crate's own Cargo.toml carries the guard
+# against a human, a registry allow-list naming no registry that exists, and
+# deliberately NOT `publish = false`: a manifest that says `false` is a package
+# `release-plz release` does not consider at all, and it answered every
+# release-PR merge from 0.1.1 to 0.2.0 with "nothing to release" (#21).
 publish = false
 
 # release.yml creates the GitHub release, because only it has the built
@@ -76,6 +79,13 @@ git_release_enable = false
 # record: v0.1.0 really was built from there. release.yml stops immediately on
 # a tag whose release already exists, so that tag costs one skipped run and
 # nothing else.
+#
+# Every tag after that was also pushed by hand, because until #21 the
+# manifest's `publish = false` hid the crate from `release-plz release` (see
+# `publish` above): `build/v0.1.4` two days late, to record a version that
+# was bumped and never built, and `build/v0.2.0` is pushed the same way, at
+# its merge commit, which carries the old manifest. From 0.2.1 on, the merge
+# does it.
 git_tag_enable = true
 git_tag_name = "build/v{{ version }}"
 

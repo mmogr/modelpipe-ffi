@@ -14,9 +14,22 @@ readme = "README.md"
 
 # Never goes to crates.io. This crate is an Apple-platform build artifact
 # whose output is an XCFramework attached to a GitHub release; a source tarball
-# on a registry would be a download nobody can use. `publish = false` is also
-# what keeps it out of any future `cargo publish --workspace`.
-publish = false
+# on a registry would be a download nobody can use.
+#
+# A registry allow-list naming no registry that exists, rather than `false`,
+# and the difference is load-bearing. `cargo publish` refuses either way: with
+# this list it stops before uploading anything, because no `nowhere` registry
+# is configured anywhere. But release-plz's `release` command considers only
+# packages whose manifest says they can be published somewhere; `publish =
+# false` hid this crate from it, so merging a release PR never pushed the
+# build tag the comments promised: every tag up to `build/v0.1.4` was pushed
+# by hand, and `build/v0.2.0` is too, since its merge commit carries the old
+# manifest (#21). The `publish = false` in release-plz.toml is what stops
+# release-plz from running `cargo publish`; this line only lets it see the
+# crate. Never configure a registry by this name: cargo selects the only
+# allowed registry by itself, so a `[registries.nowhere]` entry would make a
+# bare `cargo publish` real.
+publish = ["nowhere"]
 
 [lib]
 name = "modelpipe_ffi"
