@@ -629,6 +629,12 @@ public protocol MpPipeProtocol: AnyObject, Sendable {
     func notifyNetworkChange() async 
     
     /**
+     * Who this device connects as: its endpoint id, sixty-four hex
+     * characters, stable across launches when `identityPath` is set.
+     */
+    func peerId()  -> String
+    
+    /**
      * The loopback port this pipe bound.
      *
      * [`Self::base_url`] is what a client wants; this is for a log line or a
@@ -673,6 +679,17 @@ public protocol MpPipeProtocol: AnyObject, Sendable {
      * ```
      */
     func statusChangedSince(snapshot: MpPipeStatus) async  -> MpPipeStatus?
+    
+    /**
+     * Wait until this device has reached the far machine, for at most
+     * `within_ms`, and say how it is routed.
+     *
+     * # Errors
+     *
+     * [`MpUnreached`] when the wait runs out or the pipe closes first. On a
+     * timeout the pipe keeps looking; nothing is torn down.
+     */
+    func waitReachable(withinMs: UInt64) async throws  -> MpPipeStatus
     
     /**
      * A cancellable view of this pipe's status sequence: the wait a Swift
@@ -814,6 +831,19 @@ open func notifyNetworkChange()async   {
 }
     
     /**
+     * Who this device connects as: its endpoint id, sixty-four hex
+     * characters, stable across launches when `identityPath` is set.
+     */
+open func peerId() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_modelpipe_ffi_fn_method_mppipe_peer_id(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
      * The loopback port this pipe bound.
      *
      * [`Self::base_url`] is what a client wants; this is for a log line or a
@@ -900,6 +930,31 @@ open func statusChangedSince(snapshot: MpPipeStatus)async  -> MpPipeStatus?  {
             liftFunc: FfiConverterOptionTypeMpPipeStatus.lift,
             errorHandler: nil
             
+        )
+}
+    
+    /**
+     * Wait until this device has reached the far machine, for at most
+     * `within_ms`, and say how it is routed.
+     *
+     * # Errors
+     *
+     * [`MpUnreached`] when the wait runs out or the pipe closes first. On a
+     * timeout the pipe keeps looking; nothing is torn down.
+     */
+open func waitReachable(withinMs: UInt64)async throws  -> MpPipeStatus  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_modelpipe_ffi_fn_method_mppipe_wait_reachable(
+                        self.uniffiCloneHandle(),FfiConverterUInt64.lower(withinMs)
+                )
+            },
+            pollFunc: ffi_modelpipe_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_modelpipe_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_modelpipe_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeMpPipeStatus_lift,
+            errorHandler: FfiConverterTypeMpUnreached_lift
         )
 }
     
@@ -1181,6 +1236,16 @@ public struct MpConnectOptions: Equatable, Hashable {
      * which is otherwise hard to force.
      */
     public var relayOnly: Bool
+    /**
+     * Where this device keeps its endpoint key, so the far machine sees the
+     * same device every time. `None` mints a fresh one per process.
+     *
+     * Written readable only by this user and refused when others can read
+     * it, as modelpipe's own serve side does with its key; on Windows the
+     * directory is the only protection. Appended last: `UniFFI` emits the
+     * Swift memberwise initialiser in declaration order.
+     */
+    public var identityPath: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1211,12 +1276,22 @@ public struct MpConnectOptions: Equatable, Hashable {
          *
          * Off by default. Useful only for making the relay path reproducible,
          * which is otherwise hard to force.
-         */relayOnly: Bool = false) {
+         */relayOnly: Bool = false, 
+        /**
+         * Where this device keeps its endpoint key, so the far machine sees the
+         * same device every time. `None` mints a fresh one per process.
+         *
+         * Written readable only by this user and refused when others can read
+         * it, as modelpipe's own serve side does with its key; on Windows the
+         * directory is the only protection. Appended last: `UniFFI` emits the
+         * Swift memberwise initialiser in declaration order.
+         */identityPath: String? = nil) {
         self.port = port
         self.relayUrl = relayUrl
         self.portMapping = portMapping
         self.discovery = discovery
         self.relayOnly = relayOnly
+        self.identityPath = identityPath
     }
 
     
@@ -1239,7 +1314,8 @@ public struct FfiConverterTypeMpConnectOptions: FfiConverterRustBuffer {
                 relayUrl: FfiConverterOptionString.read(from: &buf), 
                 portMapping: FfiConverterBool.read(from: &buf), 
                 discovery: FfiConverterBool.read(from: &buf), 
-                relayOnly: FfiConverterBool.read(from: &buf)
+                relayOnly: FfiConverterBool.read(from: &buf), 
+                identityPath: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -1249,6 +1325,7 @@ public struct FfiConverterTypeMpConnectOptions: FfiConverterRustBuffer {
         FfiConverterBool.write(value.portMapping, into: &buf)
         FfiConverterBool.write(value.discovery, into: &buf)
         FfiConverterBool.write(value.relayOnly, into: &buf)
+        FfiConverterOptionString.write(value.identityPath, into: &buf)
     }
 }
 
@@ -1353,6 +1430,96 @@ public func FfiConverterTypeMpNetworkMetrics_lift(_ buf: RustBuffer) throws -> M
 #endif
 public func FfiConverterTypeMpNetworkMetrics_lower(_ value: MpNetworkMetrics) -> RustBuffer {
     return FfiConverterTypeMpNetworkMetrics.lower(value)
+}
+
+
+/**
+ * What a first pairing produces: this device's key, the name it is held
+ * under, the machine that issued it, and the pipe it was issued over.
+ */
+public struct MpPaired {
+    /**
+     * The pipe the code was redeemed over, still up.
+     */
+    public var pipe: MpPipe
+    /**
+     * This device's key from now on. Store it; nothing hands it out again.
+     */
+    public var apiKey: String
+    /**
+     * The name the far machine holds the key under.
+     */
+    public var device: String
+    /**
+     * The far machine's endpoint id, sixty-four hex characters.
+     */
+    public var serving: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The pipe the code was redeemed over, still up.
+         */pipe: MpPipe, 
+        /**
+         * This device's key from now on. Store it; nothing hands it out again.
+         */apiKey: String, 
+        /**
+         * The name the far machine holds the key under.
+         */device: String, 
+        /**
+         * The far machine's endpoint id, sixty-four hex characters.
+         */serving: String) {
+        self.pipe = pipe
+        self.apiKey = apiKey
+        self.device = device
+        self.serving = serving
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension MpPaired: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMpPaired: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MpPaired {
+        return
+            try MpPaired(
+                pipe: FfiConverterTypeMpPipe.read(from: &buf), 
+                apiKey: FfiConverterString.read(from: &buf), 
+                device: FfiConverterString.read(from: &buf), 
+                serving: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: MpPaired, into buf: inout [UInt8]) {
+        FfiConverterTypeMpPipe.write(value.pipe, into: &buf)
+        FfiConverterString.write(value.apiKey, into: &buf)
+        FfiConverterString.write(value.device, into: &buf)
+        FfiConverterString.write(value.serving, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMpPaired_lift(_ buf: RustBuffer) throws -> MpPaired {
+    return try FfiConverterTypeMpPaired.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMpPaired_lower(_ value: MpPaired) -> RustBuffer {
+    return FfiConverterTypeMpPaired.lower(value)
 }
 
 
@@ -1497,6 +1664,16 @@ enum MpError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
      */
     case PeerUnreachable
     /**
+     * `identityPath` names a file this side cannot use as its endpoint key:
+     * one that is not a key, one others can read, or one it cannot read or
+     * write. Permanent, because the path is the caller's.
+     */
+    case Identity(
+        /**
+         * The offending path. A path is not a credential, so it is shown.
+         */path: String
+    )
+    /**
      * Something modelpipe grew that this build does not know about.
      *
      * `ConnectError` is `#[non_exhaustive]`; this is where a new variant
@@ -1597,7 +1774,10 @@ public struct FfiConverterTypeMpError: FfiConverterRustBuffer {
             url: try FfiConverterString.read(from: &buf)
             )
         case 6: return .PeerUnreachable
-        case 7: return .Unknown(
+        case 7: return .Identity(
+            path: try FfiConverterString.read(from: &buf)
+            )
+        case 8: return .Unknown(
             detail: try FfiConverterString.read(from: &buf)
             )
 
@@ -1641,8 +1821,13 @@ public struct FfiConverterTypeMpError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(6))
         
         
-        case let .Unknown(detail):
+        case let .Identity(path):
             writeInt(&buf, Int32(7))
+            FfiConverterString.write(path, into: &buf)
+            
+        
+        case let .Unknown(detail):
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(detail, into: &buf)
             
         }
@@ -1662,6 +1847,217 @@ public func FfiConverterTypeMpError_lift(_ buf: RustBuffer) throws -> MpError {
 #endif
 public func FfiConverterTypeMpError_lower(_ value: MpError) -> RustBuffer {
     return FfiConverterTypeMpError.lower(value)
+}
+
+
+/**
+ * Why a pairing did not produce a key.
+ */
+public 
+enum MpPairError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * The pairing string is a ticket alone, with no code to redeem.
+     */
+    case NoCode
+    /**
+     * The pairing string is not one.
+     */
+    case BadPairingString(
+        /**
+         * What was wrong with it, in a sentence. Never contains the string.
+         */reason: String
+    )
+    /**
+     * The pipe to pair over could not be set up.
+     */
+    case Dial(
+        /**
+         * The sentence [`MpError`] would have shown.
+         */reason: String, 
+        /**
+         * Whether dialling again could succeed.
+         */retryable: Bool
+    )
+    /**
+     * The far machine was not reached in the time given.
+     */
+    case Unreached(
+        /**
+         * Which way the wait ended.
+         */why: MpUnreached
+    )
+    /**
+     * The far machine refused the code.
+     */
+    case Refused
+    /**
+     * The code could not be presented, or its answer could not be read.
+     */
+    case Exchange(
+        /**
+         * The operating system's reason.
+         */reason: String
+    )
+    /**
+     * The far machine answered with something that is not a pairing answer.
+     */
+    case Unexpected(
+        /**
+         * What was wrong with the answer.
+         */detail: String
+    )
+    /**
+     * Something modelpipe grew that this build does not know about.
+     */
+    case Unknown(
+        /**
+         * The upstream `Debug` rendering, for a bug report.
+         */detail: String
+    )
+
+    
+    /**
+     * Whether pairing again could succeed without anything else changing.
+     */
+public func isRetryable() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_modelpipe_ffi_fn_method_mppairerror_is_retryable(
+            FfiConverterTypeMpPairError_lower(self),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * The sentence to show a person.
+     */
+public func message() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_modelpipe_ffi_fn_method_mppairerror_message(
+            FfiConverterTypeMpPairError_lower(self),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension MpPairError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMpPairError: FfiConverterRustBuffer {
+    typealias SwiftType = MpPairError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MpPairError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .NoCode
+        case 2: return .BadPairingString(
+            reason: try FfiConverterString.read(from: &buf)
+            )
+        case 3: return .Dial(
+            reason: try FfiConverterString.read(from: &buf), 
+            retryable: try FfiConverterBool.read(from: &buf)
+            )
+        case 4: return .Unreached(
+            why: try FfiConverterTypeMpUnreached.read(from: &buf)
+            )
+        case 5: return .Refused
+        case 6: return .Exchange(
+            reason: try FfiConverterString.read(from: &buf)
+            )
+        case 7: return .Unexpected(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+        case 8: return .Unknown(
+            detail: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: MpPairError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case .NoCode:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .BadPairingString(reason):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .Dial(reason,retryable):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(reason, into: &buf)
+            FfiConverterBool.write(retryable, into: &buf)
+            
+        
+        case let .Unreached(why):
+            writeInt(&buf, Int32(4))
+            FfiConverterTypeMpUnreached.write(why, into: &buf)
+            
+        
+        case .Refused:
+            writeInt(&buf, Int32(5))
+        
+        
+        case let .Exchange(reason):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .Unexpected(detail):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(detail, into: &buf)
+            
+        
+        case let .Unknown(detail):
+            writeInt(&buf, Int32(8))
+            FfiConverterString.write(detail, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMpPairError_lift(_ buf: RustBuffer) throws -> MpPairError {
+    return try FfiConverterTypeMpPairError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMpPairError_lower(_ value: MpPairError) -> RustBuffer {
+    return FfiConverterTypeMpPairError.lower(value)
 }
 
 
@@ -1763,6 +2159,130 @@ public func FfiConverterTypeMpPipeStatus_lower(_ value: MpPipeStatus) -> RustBuf
     return FfiConverterTypeMpPipeStatus.lower(value)
 }
 
+
+
+/**
+ * Why [`crate::MpPipe::wait_reachable`] gave up.
+ */
+public 
+enum MpUnreached: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * The wait ran out. The pipe keeps looking.
+     */
+    case TimedOut(
+        /**
+         * How long it waited.
+         */withinMs: UInt64
+    )
+    /**
+     * The pipe closed before it reached the far machine.
+     */
+    case Closed(
+        /**
+         * Why it closed, when anything recorded it.
+         */reason: MpCloseReason?
+    )
+
+    
+    /**
+     * Whether waiting again could plausibly reach it.
+     */
+public func isRetryable() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_modelpipe_ffi_fn_method_mpunreached_is_retryable(
+            FfiConverterTypeMpUnreached_lower(self),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * The sentence to show a person.
+     */
+public func message() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_modelpipe_ffi_fn_method_mpunreached_message(
+            FfiConverterTypeMpUnreached_lower(self),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension MpUnreached: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMpUnreached: FfiConverterRustBuffer {
+    typealias SwiftType = MpUnreached
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MpUnreached {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .TimedOut(
+            withinMs: try FfiConverterUInt64.read(from: &buf)
+            )
+        case 2: return .Closed(
+            reason: try FfiConverterOptionTypeMpCloseReason.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: MpUnreached, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .TimedOut(withinMs):
+            writeInt(&buf, Int32(1))
+            FfiConverterUInt64.write(withinMs, into: &buf)
+            
+        
+        case let .Closed(reason):
+            writeInt(&buf, Int32(2))
+            FfiConverterOptionTypeMpCloseReason.write(reason, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMpUnreached_lift(_ buf: RustBuffer) throws -> MpUnreached {
+    return try FfiConverterTypeMpUnreached.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMpUnreached_lower(_ value: MpUnreached) -> RustBuffer {
+    return FfiConverterTypeMpUnreached.lower(value)
+}
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1908,6 +2428,27 @@ fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: In
     }
 }
 /**
+ * Pair with the machine a pairing string names, and keep the pipe.
+ *
+ * # Errors
+ *
+ * [`MpPairError`], whose [`MpPairError::message`] is the sentence to show.
+ */
+public func mpPair(pairing: String, label: String?, options: MpConnectOptions, reachWithinMs: UInt64)async throws  -> MpPaired  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_modelpipe_ffi_fn_func_mp_pair(FfiConverterString.lower(pairing),FfiConverterOptionString.lower(label),FfiConverterTypeMpConnectOptions_lower(options),FfiConverterUInt64.lower(reachWithinMs)
+                )
+            },
+            pollFunc: ffi_modelpipe_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_modelpipe_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_modelpipe_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeMpPaired_lift,
+            errorHandler: FfiConverterTypeMpPairError_lift
+        )
+}
+/**
  * Dial the machine a pairing ticket names.
  *
  * Returns **as soon as the local port is bound**, not once the far machine
@@ -1956,6 +2497,9 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_modelpipe_ffi_checksum_func_mp_pair() != 44442) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_modelpipe_ffi_checksum_func_mp_connect() != 4759) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1971,6 +2515,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_modelpipe_ffi_checksum_method_mppipe_notify_network_change() != 51570) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_modelpipe_ffi_checksum_method_mppipe_peer_id() != 45777) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_modelpipe_ffi_checksum_method_mppipe_port() != 13940) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1981,6 +2528,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_modelpipe_ffi_checksum_method_mppipe_status_changed_since() != 31817) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_modelpipe_ffi_checksum_method_mppipe_wait_reachable() != 14044) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_modelpipe_ffi_checksum_method_mppipe_watch() != 11647) {

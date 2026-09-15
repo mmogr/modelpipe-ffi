@@ -61,6 +61,7 @@ fn every_switch_is_carried_across() {
         port_mapping: false,
         discovery: false,
         relay_only: true,
+        identity_path: Some("/tmp/modelpipe-ffi-test.key".to_owned()),
     }
     .apply();
 
@@ -68,4 +69,8 @@ fn every_switch_is_carried_across() {
     assert!(!applied.port_mapping);
     assert!(!applied.discovery);
     assert!(applied.relay_only);
+    assert_eq!(
+        applied.identity.as_deref(),
+        Some(std::path::Path::new("/tmp/modelpipe-ffi-test.key"))
+    );
 }

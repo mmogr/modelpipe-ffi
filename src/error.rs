@@ -52,6 +52,13 @@ pub enum MpError {
     },
     /// The far machine could not be reached at all.
     PeerUnreachable,
+    /// `identityPath` names a file this side cannot use as its endpoint key:
+    /// one that is not a key, one others can read, or one it cannot read or
+    /// write. Permanent, because the path is the caller's.
+    Identity {
+        /// The offending path. A path is not a credential, so it is shown.
+        path: String,
+    },
     /// Something modelpipe grew that this build does not know about.
     ///
     /// `ConnectError` is `#[non_exhaustive]`; this is where a new variant
@@ -103,7 +110,8 @@ impl MpError {
             Self::BadTicket { .. }
             | Self::UnsupportedTicketVersion { .. }
             | Self::Bind { .. }
-            | Self::InvalidRelay { .. } => false,
+            | Self::InvalidRelay { .. }
+            | Self::Identity { .. } => false,
             Self::Endpoint { .. } | Self::PeerUnreachable | Self::Unknown { .. } => true,
         }
     }
@@ -131,6 +139,11 @@ impl fmt::Display for MpError {
             Self::InvalidRelay { url } => {
                 write!(f, "The relay address {url} is not a valid URL.")
             }
+            Self::Identity { path } => write!(
+                f,
+                "The identity file at {path} cannot be used: it is not a key, someone else can \
+                 read it, or it cannot be read or written. Choose another path or remove it."
+            ),
             Self::PeerUnreachable => write!(
                 f,
                 "The other machine did not answer. Check it is awake and still sharing."
@@ -193,6 +206,7 @@ impl From<ConnectError> for MpError {
                 reason: reason(&error),
             },
             ConnectError::InvalidRelay { url } => Self::InvalidRelay { url: url.clone() },
+            ConnectError::Identity { path, .. } => Self::Identity { path: path.clone() },
             other => Self::Unknown {
                 detail: format!("{other:?}"),
             },

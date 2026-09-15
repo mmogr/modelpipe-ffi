@@ -12,7 +12,7 @@
 //!
 //! # The shape the caller sees
 //!
-//! One free function and two objects:
+//! Two free functions, two objects, and the records they take and return:
 //!
 //! ```text
 //! mp_connect(ticket, options) -> MpPipe
@@ -27,6 +27,13 @@
 //!         MpWatch.next(snapshot)    -> MpPipeStatus?   (async; None ends it, and so does cancel)
 //!         MpWatch.cancel()
 //!         MpWatch.is_cancelled()    -> Bool
+//!     MpPipe.wait_reachable(within_ms) -> MpPipeStatus   (async; throws MpUnreached)
+//!     MpPipe.peer_id()              -> String     sixty-four hex characters
+//! mp_pair(pairing, label, options, reach_within_ms) -> MpPaired   (async; throws MpPairError)
+//!     MpPaired.pipe                 -> MpPipe     the pipe the code was redeemed over
+//!     MpPaired.api_key              -> String     this device's key, returned once
+//!     MpPaired.device               -> String     the name the far machine holds it under
+//!     MpPaired.serving              -> String     the far machine's endpoint id
 //! ```
 //!
 //! Every type is prefixed `Mp`. Swift has no namespacing within a module, and
@@ -35,15 +42,19 @@
 //! unqualified mention in the connector file ambiguous. The prefix costs a
 //! reader two characters and saves the consumer a class of compile error.
 //!
-//! # No credential crosses this boundary
+//! # No credential is accepted across this boundary
 //!
 //! [`modelpipe::ConnectOptions`] has no token field, and `connect` takes no
 //! credential of any kind: the connecting side is a plain local HTTP listener
 //! that forwards `Authorization` verbatim, and the serve edge is what checks
 //! it. So the token belongs to whatever HTTP client the app already points at
-//! [`MpPipe::base_url`], and this crate never sees, stores, or logs one. The
-//! only secret-shaped thing that reaches it is the ticket, which is redacted
-//! wherever it is rendered — see [`MpError`].
+//! [`MpPipe::base_url`], and this crate never stores or logs one. One is
+//! *returned*, once: [`mp_pair`] hands back the device key the far machine
+//! minted, inside [`MpPaired`], whose `Debug` renders it redacted; the field
+//! itself is a plain string the app owns from then on. The secret-shaped
+//! things that reach this crate are the ticket and the pairing code inside a
+//! pairing string, redacted wherever an error renders them — see [`MpError`]
+//! and [`MpPairError`].
 //!
 //! # Status is polled, not streamed
 //!
@@ -105,6 +116,8 @@
 
 mod error;
 mod options;
+mod pair;
+mod pair_error;
 mod pipe;
 mod runtime;
 mod status;
@@ -112,6 +125,8 @@ mod watch;
 
 pub use error::MpError;
 pub use options::MpConnectOptions;
+pub use pair::{MpPaired, mp_pair};
+pub use pair_error::{MpPairError, MpUnreached};
 pub use pipe::{MpPipe, mp_connect};
 pub use status::{MpCloseReason, MpNetworkMetrics, MpPipeStatus};
 pub use watch::MpWatch;
@@ -141,6 +156,9 @@ const fn auto_trait_promises() {
 
     assert::<MpPipe>();
     assert::<MpWatch>();
+    assert::<MpPaired>();
+    assert::<MpPairError>();
+    assert::<MpUnreached>();
     assert::<MpError>();
     assert::<MpConnectOptions>();
 

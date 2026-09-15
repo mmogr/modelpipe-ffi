@@ -138,7 +138,8 @@ let pipe = try await mpConnect(
         relayUrl: nil,
         portMapping: false,
         discovery: false,
-        relayOnly: false
+        relayOnly: false,
+        identityPath: nil
     )
 )
 
@@ -205,6 +206,79 @@ guard next == nil else {
     fail("the status sequence did not end after a close, got \(String(describing: next))")
 }
 print("ok  the status sequence ends")
+
+// 5. Pairing crosses the boundary. Nothing listens at the vector ticket, so
+//    a pairing string made from it and a fabricated code times out before the
+//    code is ever presented; that is the whole exchange short of a far machine.
+let fresh = try await mpConnect(
+    ticket: ticket,
+    options: MpConnectOptions(
+        port: nil, relayUrl: nil, portMapping: false, discovery: false,
+        relayOnly: false, identityPath: nil
+    )
+)
+do {
+    _ = try await fresh.waitReachable(withinMs: 150)
+    fail("a pipe to nothing reported itself reached")
+} catch let error as MpUnreached {
+    guard case .TimedOut = error, error.isRetryable() else {
+        fail("expected a retryable timeout, got \(error)")
+    }
+    print("ok  waitReachable times out: \(error.message())")
+} catch {
+    fail("unexpected error type: \(error)")
+}
+let id = fresh.peerId()
+guard id.count == 64, id.allSatisfy({ $0.isHexDigit }) else {
+    fail("peerId is not sixty-four hex characters: \(id)")
+}
+print("ok  peerId is sixty-four hex characters")
+await fresh.shutdown()
+
+do {
+    _ = try await mpPair(
+        pairing: "\(ticket)-123456", label: "smoke",
+        options: MpConnectOptions(
+            port: nil, relayUrl: nil, portMapping: false, discovery: false,
+            relayOnly: false, identityPath: nil
+        ),
+        reachWithinMs: 150
+    )
+    fail("pairing with nothing listening succeeded")
+} catch let error as MpPairError {
+    guard case .Unreached = error, error.isRetryable() else {
+        fail("expected a retryable Unreached, got \(error)")
+    }
+    let message = error.message()
+    guard message.hasSuffix(".") || message.hasSuffix(")"), !message.contains("MpPairError") else {
+        fail("the pairing error is not a sentence: \(message)")
+    }
+    print("ok  pairing with nothing listening is Unreached, retryable, and a sentence")
+} catch {
+    fail("unexpected error type: \(error)")
+}
+
+// 6. A constructed MpPaired pins the memberwise initialiser's order, and the
+//    hand-written description withholds the key. A real redemption needs a
+//    far machine and is the on-device spike's job.
+let fake = MpPaired(
+    pipe: MpPipe(noHandle: MpPipe.NoHandle()),
+    apiKey: "secret-key-0123",
+    device: "dev-smoke",
+    serving: String(repeating: "0", count: 64)
+)
+// The placeholder pipe has no Rust handle behind it, so nothing here may call
+// into it; the fields are what pin the initialiser's order.
+guard fake.device == "dev-smoke", fake.serving.count == 64, fake.apiKey == "secret-key-0123"
+else {
+    fail("MpPaired's memberwise initialiser has been reordered")
+}
+for rendering in [String(describing: fake), "\(fake)", String(reflecting: fake)] {
+    guard !rendering.contains("secret-key-0123"), rendering.contains("dev-smoke") else {
+        fail("a rendering of MpPaired shows the key or hides the device: \(rendering)")
+    }
+}
+print("ok  MpPaired renders without its key")
 
 print("smoke: the binding links and answers across the boundary")
 SMOKE_SWIFT

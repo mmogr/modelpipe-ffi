@@ -119,7 +119,7 @@ impl From<NetworkMetrics> for MpNetworkMetrics {
 /// Deliberately not an error path: the pipe still works, and a phone in the
 /// middle of a reply should not be handed a failure because modelpipe grew a
 /// state. The line names the variant so the next build knows what to add.
-fn tracing_unknown(variant: &str) {
+pub(crate) fn tracing_unknown(variant: &str) {
     // No `tracing` dependency here on purpose — one line on stderr, at the
     // one place it can happen, is not worth a subscriber the host would have
     // to install and configure through the FFI boundary.
