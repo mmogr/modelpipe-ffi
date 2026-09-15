@@ -12,7 +12,7 @@
 //!
 //! # The shape the caller sees
 //!
-//! One free function and one object:
+//! One free function and two objects:
 //!
 //! ```text
 //! mp_connect(ticket, options) -> MpPipe
@@ -23,6 +23,10 @@
 //!     MpPipe.notify_network_change()                   (async)
 //!     MpPipe.network_metrics()      -> MpNetworkMetrics
 //!     MpPipe.shutdown()                                (async)
+//!     MpPipe.watch()                -> MpWatch
+//!         MpWatch.next(snapshot)    -> MpPipeStatus?   (async; None ends it, and so does cancel)
+//!         MpWatch.cancel()
+//!         MpWatch.is_cancelled()    -> Bool
 //! ```
 //!
 //! Every type is prefixed `Mp`. Swift has no namespacing within a module, and
@@ -58,6 +62,13 @@
 //! Rebuilding that as a Swift `AsyncStream` is three lines and belongs on the
 //! Swift side, where the app's own multicast relay already lives.
 //!
+//! A wait ends when the pipe closes, or when a watch is cancelled. `UniFFI`
+//! 0.32's Swift never calls `rust_future_cancel`, so cancelling the Swift
+//! `Task` that awaits `statusChangedSince` leaves the Rust future parked until
+//! the next status change. [`MpPipe::watch`] hands out an [`MpWatch`] whose
+//! `next` ends when [`MpWatch::cancel`] is called, before or during the wait,
+//! so an app can end a wait while the pipe stays up.
+//!
 //! # The runtime, and who owns it
 //!
 //! Recorded here because it is a decision with alternatives, not an
@@ -81,8 +92,9 @@
 //! - **Async across the boundary, not a callback interface.** The exported
 //!   methods are `async fn`, which `UniFFI` bridges to Swift `async` — so
 //!   `statusChangedSince` is awaited from a `Task` like any other Swift
-//!   async call, and cancellation, structured concurrency and actor hopping
-//!   all work as the app already expects. A callback interface would invert
+//!   async call, and structured concurrency and actor hopping work as the
+//!   app already expects. Cancellation does not cross the boundary; a watch
+//!   is how a wait is ended from Swift. A callback interface would invert
 //!   that, hand Swift a completion handler to bridge back into `AsyncStream`
 //!   by hand, and make the ffi responsible for a threading contract the
 //!   language already has.
@@ -96,11 +108,13 @@ mod options;
 mod pipe;
 mod runtime;
 mod status;
+mod watch;
 
 pub use error::MpError;
 pub use options::MpConnectOptions;
 pub use pipe::{MpPipe, mp_connect};
 pub use status::{MpCloseReason, MpNetworkMetrics, MpPipeStatus};
+pub use watch::MpWatch;
 
 // Defines `UniFfiTag` and the `extern "C"` entry points. Must be at the crate
 // root: every `uniffi` derive below resolves that tag there.
@@ -126,6 +140,7 @@ const fn auto_trait_promises() {
     const fn assert_copy_eq<T: Copy + Eq>() {}
 
     assert::<MpPipe>();
+    assert::<MpWatch>();
     assert::<MpError>();
     assert::<MpConnectOptions>();
 

@@ -53,6 +53,7 @@ and nothing on an iPhone wants to be a backend.
 | `pipe.notifyNetworkChange()` | Call on every app resume. See below. |
 | `pipe.networkMetrics()` | Relay counters, including rate limiting. |
 | `pipe.shutdown()` | Idempotent and terminal. |
+| `pipe.watch()` | A cancellable wait on the status sequence: `watch.next(snapshot:)` answers like `statusChangedSince`, and `watch.cancel()` ends it, before or during the wait. |
 
 ### No credential crosses this boundary
 
@@ -80,6 +81,13 @@ while let next = await pipe.statusChangedSince(snapshot: held) {
 }
 continuation.finish()                           // only after a close
 ```
+
+A wait ends when the pipe closes, or when a watch is cancelled. Cancelling
+the Swift `Task` that awaits `statusChangedSince` does not cross the boundary
+(the generated Swift never calls `rust_future_cancel`), so the Rust future
+stays parked until the next status change. To end a wait while the pipe stays
+up, hold a `pipe.watch()` and call `cancel()` on it; its `next(snapshot:)`
+answers `nil` from then on.
 
 The caller supplies the snapshot deliberately. modelpipe's own documentation
 calls this "the form to reach for from a language binding": the coalescing

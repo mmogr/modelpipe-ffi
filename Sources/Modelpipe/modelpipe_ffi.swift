@@ -674,6 +674,12 @@ public protocol MpPipeProtocol: AnyObject, Sendable {
      */
     func statusChangedSince(snapshot: MpPipeStatus) async  -> MpPipeStatus?
     
+    /**
+     * A cancellable view of this pipe's status sequence: the wait a Swift
+     * `Task` cannot cancel across the boundary, as an object it can.
+     */
+    func watch()  -> MpWatch
+    
 }
 /**
  * A live pipe: a loopback listener on this device that *is* the far
@@ -897,6 +903,19 @@ open func statusChangedSince(snapshot: MpPipeStatus)async  -> MpPipeStatus?  {
         )
 }
     
+    /**
+     * A cancellable view of this pipe's status sequence: the wait a Swift
+     * `Task` cannot cancel across the boundary, as an object it can.
+     */
+open func watch() -> MpWatch  {
+    return try!  FfiConverterTypeMpWatch_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_modelpipe_ffi_fn_method_mppipe_watch(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
 
     
 }
@@ -940,6 +959,186 @@ public func FfiConverterTypeMpPipe_lift(_ handle: UInt64) throws -> MpPipe {
 #endif
 public func FfiConverterTypeMpPipe_lower(_ value: MpPipe) -> UInt64 {
     return FfiConverterTypeMpPipe.lower(value)
+}
+
+
+
+
+
+
+/**
+ * A cancellable view of one pipe's status sequence.
+ *
+ * `statusChangedSince` stays for a caller that ends its wait by closing the
+ * pipe; a watch is for ending a wait while the pipe stays up.
+ */
+public protocol MpWatchProtocol: AnyObject, Sendable {
+    
+    /**
+     * End every wait on this watch, in flight or yet to start.
+     */
+    func cancel() 
+    
+    /**
+     * Whether [`cancel`](Self::cancel) has been called.
+     */
+    func isCancelled()  -> Bool
+    
+    /**
+     * Wait for a status different from `snapshot`. `None` once the pipe is
+     * closed and `snapshot` already says so, or once [`cancel`](Self::cancel)
+     * has been called, whether before this wait began or during it.
+     */
+    func next(snapshot: MpPipeStatus) async  -> MpPipeStatus?
+    
+}
+/**
+ * A cancellable view of one pipe's status sequence.
+ *
+ * `statusChangedSince` stays for a caller that ends its wait by closing the
+ * pipe; a watch is for ending a wait while the pipe stays up.
+ */
+open class MpWatch: MpWatchProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_modelpipe_ffi_fn_clone_mpwatch(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_modelpipe_ffi_fn_free_mpwatch(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * End every wait on this watch, in flight or yet to start.
+     */
+open func cancel()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_modelpipe_ffi_fn_method_mpwatch_cancel(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Whether [`cancel`](Self::cancel) has been called.
+     */
+open func isCancelled() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_modelpipe_ffi_fn_method_mpwatch_is_cancelled(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Wait for a status different from `snapshot`. `None` once the pipe is
+     * closed and `snapshot` already says so, or once [`cancel`](Self::cancel)
+     * has been called, whether before this wait began or during it.
+     */
+open func next(snapshot: MpPipeStatus)async  -> MpPipeStatus?  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_modelpipe_ffi_fn_method_mpwatch_next(
+                        self.uniffiCloneHandle(),FfiConverterTypeMpPipeStatus_lower(snapshot)
+                )
+            },
+            pollFunc: ffi_modelpipe_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_modelpipe_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_modelpipe_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeMpPipeStatus.lift,
+            errorHandler: nil
+            
+        )
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMpWatch: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = MpWatch
+
+    public static func lift(_ handle: UInt64) throws -> MpWatch {
+        return MpWatch(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: MpWatch) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MpWatch {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: MpWatch, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMpWatch_lift(_ handle: UInt64) throws -> MpWatch {
+    return try FfiConverterTypeMpWatch.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMpWatch_lower(_ value: MpWatch) -> UInt64 {
+    return FfiConverterTypeMpWatch.lower(value)
 }
 
 
@@ -1782,6 +1981,18 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_modelpipe_ffi_checksum_method_mppipe_status_changed_since() != 31817) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_modelpipe_ffi_checksum_method_mppipe_watch() != 11647) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_modelpipe_ffi_checksum_method_mpwatch_cancel() != 59454) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_modelpipe_ffi_checksum_method_mpwatch_is_cancelled() != 10657) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_modelpipe_ffi_checksum_method_mpwatch_next() != 21592) {
         return InitializationResult.apiChecksumMismatch
     }
 

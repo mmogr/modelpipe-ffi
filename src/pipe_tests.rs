@@ -241,3 +241,65 @@ async fn a_pipe_that_reached_nothing_reports_zeroes() {
     assert_eq!(pipe.network_metrics(), MpNetworkMetrics::default());
     pipe.shutdown().await;
 }
+
+/// Dropping the last reference outside the runtime returns at once: the
+/// courtesy close is handed to the runtime, not run on the dropping thread.
+/// The bound is wide on purpose; a `spawn` costs microseconds, and a loaded
+/// machine must not fail this. (A close that ran on this thread instead is
+/// caught by the test below, not by this timing.)
+#[test]
+fn dropping_a_pipe_outside_a_runtime_does_not_block_the_dropping_thread() {
+    let pipe = crate::runtime::runtime()
+        .block_on(mp_connect(GOOD_TICKET.to_owned(), offline_options()))
+        .expect("binds");
+    let handle = Arc::clone(&pipe.handle);
+
+    let started = std::time::Instant::now();
+    drop(pipe);
+    let returned_after = started.elapsed();
+    assert!(
+        returned_after < std::time::Duration::from_secs(1),
+        "the drop took {returned_after:?}"
+    );
+
+    // The timeout is built inside the runtime: a `Sleep` needs one to exist.
+    let closed = crate::runtime::runtime().block_on(async {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            handle.status_changed_since(modelpipe::PipeStatus::Idle),
+        )
+        .await
+    });
+    let closed_after = started.elapsed();
+    assert_eq!(
+        closed.expect("the courtesy close runs"),
+        Some(modelpipe::PipeStatus::Closed)
+    );
+    eprintln!("drop returned after {returned_after:?}; the close finished after {closed_after:?}");
+}
+
+/// Dropped from inside the runtime, the pipe is still closed. The guard that
+/// used to skip the close there is gone, and a `block_on` there would panic,
+/// so this is the test a restored `block_on` fails.
+#[tokio::test]
+async fn dropping_a_pipe_from_inside_the_runtime_still_closes_it() {
+    let pipe = crate::runtime::runtime()
+        .spawn(mp_connect(GOOD_TICKET.to_owned(), offline_options()))
+        .await
+        .expect("the dial task finished")
+        .expect("binds");
+    let handle = Arc::clone(&pipe.handle);
+
+    crate::runtime::runtime()
+        .spawn(async move { drop(pipe) })
+        .await
+        .expect("the drop task finished");
+
+    let closed = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        handle.status_changed_since(modelpipe::PipeStatus::Idle),
+    )
+    .await
+    .expect("the courtesy close runs from inside the runtime too");
+    assert_eq!(closed, Some(modelpipe::PipeStatus::Closed));
+}

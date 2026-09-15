@@ -8,8 +8,9 @@ use modelpipe::{ConnectHandle, Ticket};
 
 use crate::error::MpError;
 use crate::options::MpConnectOptions;
-use crate::runtime::{block_on, runtime};
+use crate::runtime::runtime;
 use crate::status::{MpCloseReason, MpNetworkMetrics, MpPipeStatus};
+use crate::watch::MpWatch;
 
 /// How long `shutdown` waits for in-flight requests before dropping them.
 ///
@@ -29,7 +30,9 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 /// out.
 #[derive(uniffi::Object)]
 pub struct MpPipe {
-    handle: ConnectHandle,
+    /// Shared with the courtesy close `Drop` hands to the runtime, and with
+    /// every watch: the handle outlives the Swift object that dropped it.
+    handle: Arc<ConnectHandle>,
 }
 
 /// Dial the machine a pairing ticket names.
@@ -55,11 +58,26 @@ pub async fn mp_connect(ticket: String, options: MpConnectOptions) -> Result<Arc
     // nothing and should not be indistinguishable from a machine that is away.
     let ticket = Ticket::from_str(&ticket)?;
     let handle = modelpipe::connect(&ticket, options.apply()).await?;
-    Ok(Arc::new(MpPipe { handle }))
+    Ok(Arc::new(MpPipe::new(handle)))
+}
+
+impl MpPipe {
+    /// Wrap a handle this crate has just been given.
+    pub(crate) fn new(handle: ConnectHandle) -> Self {
+        Self {
+            handle: Arc::new(handle),
+        }
+    }
 }
 
 #[uniffi::export(async_runtime = "tokio")]
 impl MpPipe {
+    /// A cancellable view of this pipe's status sequence: the wait a Swift
+    /// `Task` cannot cancel across the boundary, as an object it can.
+    pub fn watch(&self) -> Arc<MpWatch> {
+        Arc::new(MpWatch::new(Arc::clone(&self.handle)))
+    }
+
     /// `http://127.0.0.1:<port>/v1` — point an OpenAI-compatible client here,
     /// with the far machine's key as the API key.
     ///
@@ -164,17 +182,22 @@ impl Drop for MpPipe {
         // so the port is never left bound. What it cannot do from a `Drop` is
         // the async half that tells the far side, and a Swift object losing
         // its last reference is a perfectly ordinary way for a pipe to end —
-        // an app dismissing a screen mid-dial does it. Entering the runtime
-        // here buys that courtesy where there is a runtime to enter.
+        // an app dismissing a screen mid-dial does it.
         //
-        // Guarded on not already being inside it: `block_on` from a runtime
-        // thread panics, and a `Drop` that panics while unwinding aborts the
-        // process. Inside the runtime, the synchronous `Drop` below is all
-        // that happens, which is correct rather than merely safe.
-        if tokio::runtime::Handle::try_current().is_err() {
-            let _guard = runtime().enter();
-            block_on(self.handle.shutdown_timeout(Duration::ZERO));
-        }
+        // That courtesy is handed to the runtime rather than run here. Run
+        // here it blocked the dropping thread on the far side's teardown,
+        // unbounded on a live connection, and it could not run at all from a
+        // runtime thread, where a `block_on` panics and a `Drop` that panics
+        // while unwinding aborts the process. The handle is shared, so the
+        // task holds it alive until the close is done. No grace: an exchange
+        // in flight is cut, and the far side sees the connection close at
+        // once with the same `shutdown` reason a `shutdown()` sends, since
+        // the task holds the last reference and the handle's own `Drop` then
+        // finds nothing left to close. If the process exits before the task
+        // runs, nothing is sent and the peer idles the connection out, as it
+        // did before from inside the runtime.
+        let handle = Arc::clone(&self.handle);
+        runtime().spawn(async move { handle.shutdown_timeout(Duration::ZERO).await });
     }
 }
 
