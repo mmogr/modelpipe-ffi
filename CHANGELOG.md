@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.1.4...build/v0.2.0) - 2026-09-15
+
+### Added
+
+- *(ffi)* pairing crosses the boundary, and a device can keep its identity ([#19](https://github.com/mmogr/modelpipe-ffi/pull/19))
+
+### Fixed
+
+- *(ffi)* a dropped pipe does not block, and a cancelled wait returns ([#18](https://github.com/mmogr/modelpipe-ffi/pull/18))
+
+### Other
+
+- *(deps)* build against modelpipe 0.6, the release that carries pairing ([#17](https://github.com/mmogr/modelpipe-ffi/pull/17))
+
 ## [0.1.4](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.1.3...build/v0.1.4) - 2026-09-12
 
 ### Other
