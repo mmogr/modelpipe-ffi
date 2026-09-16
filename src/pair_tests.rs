@@ -9,7 +9,8 @@ use crate::status::MpPipeStatus;
 
 /// modelpipe's normative ticket vector 1: well-formed, and names an endpoint
 /// nothing is listening on.
-const GOOD_TICKET: &str = "pipeadlvvgabqkyqvn6vjp7nhslea45a5yls6pnkmizfv4bbu2hxa5iruaaauhlp2na";
+pub(super) const GOOD_TICKET: &str =
+    "pipeadlvvgabqkyqvn6vjp7nhslea45a5yls6pnkmizfv4bbu2hxa5iruaaauhlp2na";
 
 fn offline_options() -> MpConnectOptions {
     MpConnectOptions {
