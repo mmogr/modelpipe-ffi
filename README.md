@@ -56,6 +56,7 @@ and nothing on an iPhone wants to be a backend.
 | `pipe.waitReachable(withinMs:)` | Waits until the far machine is reached and says how it is routed, or throws `MpUnreached`; a timeout tears nothing down. |
 | `pipe.peerId()` | Who this device connects as: sixty-four hex characters, stable across launches when `identityPath` is set. |
 | `mpPair(pairing:label:options:reachWithinMs:)` | Dial, wait to reach the far machine, redeem the code, and return `MpPaired`: the pipe still up, this device's key, the name it is held under, and the far machine's id. The key is returned once and never kept here. |
+| `mpReadPairing(pairing:)` | Read a pairing string without pairing, synchronously: the ticket in canonical form and whether there is a code, so a form can accept a paste as it is typed and know whether to ask for a token. The code never comes back. Throws `MpPairError.BadPairingString`. |
 | `MpConnectOptions.identityPath` | Where this device keeps its endpoint key, so the far machine sees the same device every time. `nil` mints one per process. |
 | `pipe.watch()` | A cancellable wait on the status sequence: `watch.next(snapshot:)` answers like `statusChangedSince`, and `watch.cancel()` ends it, before or during the wait. |
 

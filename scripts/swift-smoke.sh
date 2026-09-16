@@ -235,6 +235,36 @@ guard id.count == 64, id.allSatisfy({ $0.isHexDigit }) else {
 print("ok  peerId is sixty-four hex characters")
 await fresh.shutdown()
 
+// 5b. A pairing string is read without pairing: the form's question, answered
+//     by modelpipe's own parse, synchronously. The code never comes back, and
+//     the renderings withhold the ticket.
+let read = try mpReadPairing(pairing: " \(ticket.uppercased())-123456 ")
+guard read.hasCode, read.ticket == ticket.lowercased() else {
+    fail("reading a pairing string with a code got hasCode \(read.hasCode)")
+}
+let bare = try mpReadPairing(pairing: ticket)
+guard !bare.hasCode, bare.ticket == ticket.lowercased() else {
+    fail("a ticket alone read as a first pairing")
+}
+do {
+    _ = try mpReadPairing(pairing: "nope-12345")
+    fail("reading a string that is not a pairing string succeeded")
+} catch let error as MpPairError {
+    guard case .BadPairingString = error, !error.isRetryable() else {
+        fail("expected BadPairingString, got \(error)")
+    }
+    let message = error.message()
+    guard message.hasSuffix(")."), !message.contains("nope"), !message.contains("12345") else {
+        fail("the reading error is not a sentence, or shows the paste: \(message)")
+    }
+}
+for rendering in [String(describing: read), "\(read)", String(reflecting: read)] {
+    guard !rendering.contains(ticket.lowercased()), rendering.contains("hasCode: true") else {
+        fail("a rendering of MpPairingString shows the ticket: \(rendering)")
+    }
+}
+print("ok  a pairing string is read without pairing, and renders without its ticket")
+
 do {
     _ = try await mpPair(
         pairing: "\(ticket)-123456", label: "smoke",

@@ -12,7 +12,7 @@
 //!
 //! # The shape the caller sees
 //!
-//! Two free functions, two objects, and the records they take and return:
+//! Three free functions, two objects, and the records they take and return:
 //!
 //! ```text
 //! mp_connect(ticket, options) -> MpPipe
@@ -29,6 +29,9 @@
 //!         MpWatch.is_cancelled()    -> Bool
 //!     MpPipe.wait_reachable(within_ms) -> MpPipeStatus   (async; throws MpUnreached)
 //!     MpPipe.peer_id()              -> String     sixty-four hex characters
+//! mp_read_pairing(pairing)     -> MpPairingString   (sync; throws MpPairError)
+//!     MpPairingString.ticket        -> String     canonical lower case, the code left out
+//!     MpPairingString.has_code      -> Bool       a first pairing, or a plain dial
 //! mp_pair(pairing, label, options, reach_within_ms) -> MpPaired   (async; throws MpPairError)
 //!     MpPaired.pipe                 -> MpPipe     the pipe the code was redeemed over
 //!     MpPaired.api_key              -> String     this device's key, returned once
@@ -125,7 +128,7 @@ mod watch;
 
 pub use error::MpError;
 pub use options::MpConnectOptions;
-pub use pair::{MpPaired, mp_pair};
+pub use pair::{MpPaired, MpPairingString, mp_pair, mp_read_pairing};
 pub use pair_error::{MpPairError, MpUnreached};
 pub use pipe::{MpPipe, mp_connect};
 pub use status::{MpCloseReason, MpNetworkMetrics, MpPipeStatus};
@@ -157,6 +160,7 @@ const fn auto_trait_promises() {
     assert::<MpPipe>();
     assert::<MpWatch>();
     assert::<MpPaired>();
+    assert::<MpPairingString>();
     assert::<MpPairError>();
     assert::<MpUnreached>();
     assert::<MpError>();

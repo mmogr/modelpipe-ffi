@@ -1524,6 +1524,80 @@ public func FfiConverterTypeMpPaired_lower(_ value: MpPaired) -> RustBuffer {
 
 
 /**
+ * A pairing string taken apart, as much of it as an app needs: who it names,
+ * and whether it carries a code. The code itself never crosses.
+ */
+public struct MpPairingString: Equatable, Hashable {
+    /**
+     * The ticket, in modelpipe's canonical lower-case form, whatever case it
+     * was pasted or scanned in.
+     */
+    public var ticket: String
+    /**
+     * Whether the string carries a code, which makes it a first pairing for
+     * [`mp_pair`] rather than a dial for [`crate::mp_connect`].
+     */
+    public var hasCode: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The ticket, in modelpipe's canonical lower-case form, whatever case it
+         * was pasted or scanned in.
+         */ticket: String, 
+        /**
+         * Whether the string carries a code, which makes it a first pairing for
+         * [`mp_pair`] rather than a dial for [`crate::mp_connect`].
+         */hasCode: Bool) {
+        self.ticket = ticket
+        self.hasCode = hasCode
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension MpPairingString: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMpPairingString: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MpPairingString {
+        return
+            try MpPairingString(
+                ticket: FfiConverterString.read(from: &buf), 
+                hasCode: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: MpPairingString, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.ticket, into: &buf)
+        FfiConverterBool.write(value.hasCode, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMpPairingString_lift(_ buf: RustBuffer) throws -> MpPairingString {
+    return try FfiConverterTypeMpPairingString.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMpPairingString_lower(_ value: MpPairingString) -> RustBuffer {
+    return FfiConverterTypeMpPairingString.lower(value)
+}
+
+
+/**
  * Why a pipe closed, when it has.
  */
 
@@ -2449,6 +2523,27 @@ public func mpPair(pairing: String, label: String?, options: MpConnectOptions, r
         )
 }
 /**
+ * Read a pairing string without pairing.
+ *
+ * A form can accept or refuse a paste as it is typed, decide whether to ask
+ * for a token, and keep the ticket, without a dial. The parse is modelpipe's
+ * own, so what this accepts [`mp_pair`] accepts, and a ticket with a bad
+ * checksum is refused here rather than at the dial. Synchronous: one C call.
+ *
+ * # Errors
+ *
+ * [`MpPairError::BadPairingString`], whose [`MpPairError::message`] is the
+ * sentence to show, and which never contains the string.
+ */
+public func mpReadPairing(pairing: String)throws  -> MpPairingString  {
+    return try  FfiConverterTypeMpPairingString_lift(try rustCallWithError(FfiConverterTypeMpPairError_lift) {
+        uniffiCallStatus in
+    uniffi_modelpipe_ffi_fn_func_mp_read_pairing(
+        FfiConverterString.lower(pairing),uniffiCallStatus
+    )
+})
+}
+/**
  * Dial the machine a pairing ticket names.
  *
  * Returns **as soon as the local port is bound**, not once the far machine
@@ -2498,6 +2593,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_modelpipe_ffi_checksum_func_mp_pair() != 44442) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_modelpipe_ffi_checksum_func_mp_read_pairing() != 61882) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_modelpipe_ffi_checksum_func_mp_connect() != 4759) {

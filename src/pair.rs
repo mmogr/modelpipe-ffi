@@ -1,5 +1,5 @@
 //! Pairing, across the boundary: a pairing string in, a key and a live pipe
-//! out.
+//! out. And, for a form, a pairing string read without any of that.
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -69,6 +69,54 @@ pub async fn mp_pair(
     })
 }
 
+/// A pairing string taken apart, as much of it as an app needs: who it names,
+/// and whether it carries a code. The code itself never crosses.
+#[derive(Clone, PartialEq, Eq, uniffi::Record)]
+pub struct MpPairingString {
+    /// The ticket, in modelpipe's canonical lower-case form, whatever case it
+    /// was pasted or scanned in.
+    pub ticket: String,
+    /// Whether the string carries a code, which makes it a first pairing for
+    /// [`mp_pair`] rather than a dial for [`crate::mp_connect`].
+    pub has_code: bool,
+}
+
+impl std::fmt::Debug for MpPairingString {
+    /// Hand-written for the reason `MpPaired`'s is: a ticket is what this
+    /// crate redacts wherever an error renders one, and a derived `Debug`
+    /// would print it in full. Whether there is a code is what a bug report
+    /// needs; `finish_non_exhaustive` says something is withheld.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MpPairingString")
+            .field("has_code", &self.has_code)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Read a pairing string without pairing.
+///
+/// A form can accept or refuse a paste as it is typed, decide whether to ask
+/// for a token, and keep the ticket, without a dial. The parse is modelpipe's
+/// own, so what this accepts [`mp_pair`] accepts, and a ticket with a bad
+/// checksum is refused here rather than at the dial. Synchronous: one C call.
+///
+/// # Errors
+///
+/// [`MpPairError::BadPairingString`], whose [`MpPairError::message`] is the
+/// sentence to show, and which never contains the string.
+#[uniffi::export]
+pub fn mp_read_pairing(pairing: &str) -> Result<MpPairingString, MpPairError> {
+    let pairing = PairingString::from_str(pairing)?;
+    Ok(MpPairingString {
+        ticket: pairing.ticket().to_string(),
+        has_code: pairing.code().is_some(),
+    })
+}
+
 #[cfg(test)]
 #[path = "pair_tests.rs"]
 mod pair_tests;
+
+#[cfg(test)]
+#[path = "read_pairing_tests.rs"]
+mod read_pairing_tests;
