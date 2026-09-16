@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.2.0...build/v0.3.0) - 2026-09-16
+
+### Added
+
+- *(ffi)* a pairing string can be read without pairing ([#27](https://github.com/mmogr/modelpipe-ffi/pull/27))
+
+### Fixed
+
+- *(release)* merging a release PR pushes its build tag ([#22](https://github.com/mmogr/modelpipe-ffi/pull/22))
+
+### Other
+
+- *(deps)* bump uniffi from 0.32.0 to 0.32.1 ([#26](https://github.com/mmogr/modelpipe-ffi/pull/26))
+- *(release)* pin the v0.2.0 XCFramework checksum
+
 ## [0.2.0](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.1.4...build/v0.2.0) - 2026-09-15
 
 ### Added
