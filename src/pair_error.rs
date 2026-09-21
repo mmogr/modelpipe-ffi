@@ -110,6 +110,18 @@ pub enum MpPairError {
         /// What was wrong with the answer.
         detail: String,
     },
+    /// The far machine answered the pairing request with an HTTP status that
+    /// is not a pairing answer.
+    ///
+    /// Separate from [`Unexpected`](Self::Unexpected), which carries a
+    /// sentence, because a status is a number an app can branch on. It used
+    /// to arrive as that sentence, and every consumer that wanted the
+    /// distinction matched on modelpipe's words — a contract no crate should
+    /// ask anyone to keep.
+    UnexpectedStatus {
+        /// The status the far machine answered with.
+        status: u16,
+    },
     /// Something modelpipe grew that this build does not know about.
     Unknown {
         /// The upstream `Debug` rendering, for a bug report.
@@ -135,7 +147,8 @@ impl MpPairError {
             Self::NoCode
             | Self::BadPairingString { .. }
             | Self::Refused
-            | Self::Unexpected { .. } => false,
+            | Self::Unexpected { .. }
+            | Self::UnexpectedStatus { .. } => false,
         }
     }
 }
@@ -164,6 +177,16 @@ impl fmt::Display for MpPairError {
             Self::Unexpected { detail } => write!(
                 f,
                 "The other machine's answer was not a pairing answer ({detail})."
+            ),
+            Self::UnexpectedStatus { status: 404 } => write!(
+                f,
+                "The other machine answered the pairing request with HTTP 404, which is not a \
+                 pairing answer. It is probably running a version too old to pair this way."
+            ),
+            Self::UnexpectedStatus { status } => write!(
+                f,
+                "The other machine answered the pairing request with HTTP {status}, which is \
+                 not a pairing answer."
             ),
             Self::Unknown { detail } => write!(
                 f,
@@ -202,6 +225,7 @@ impl From<PairError> for MpPairError {
             PairError::Unexpected(why) => Self::Unexpected {
                 detail: why.to_owned(),
             },
+            PairError::UnexpectedStatus { status } => Self::UnexpectedStatus { status },
             other => Self::Unknown {
                 detail: format!("{other:?}"),
             },

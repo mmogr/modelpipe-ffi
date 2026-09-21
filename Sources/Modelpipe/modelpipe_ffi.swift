@@ -1984,6 +1984,21 @@ enum MpPairError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
          */detail: String
     )
     /**
+     * The far machine answered the pairing request with an HTTP status that
+     * is not a pairing answer.
+     *
+     * Separate from [`Unexpected`](Self::Unexpected), which carries a
+     * sentence, because a status is a number an app can branch on. It used
+     * to arrive as that sentence, and every consumer that wanted the
+     * distinction matched on modelpipe's words — a contract no crate should
+     * ask anyone to keep.
+     */
+    case UnexpectedStatus(
+        /**
+         * The status the far machine answered with.
+         */status: UInt16
+    )
+    /**
      * Something modelpipe grew that this build does not know about.
      */
     case Unknown(
@@ -2062,7 +2077,10 @@ public struct FfiConverterTypeMpPairError: FfiConverterRustBuffer {
         case 7: return .Unexpected(
             detail: try FfiConverterString.read(from: &buf)
             )
-        case 8: return .Unknown(
+        case 8: return .UnexpectedStatus(
+            status: try FfiConverterUInt16.read(from: &buf)
+            )
+        case 9: return .Unknown(
             detail: try FfiConverterString.read(from: &buf)
             )
 
@@ -2111,8 +2129,13 @@ public struct FfiConverterTypeMpPairError: FfiConverterRustBuffer {
             FfiConverterString.write(detail, into: &buf)
             
         
-        case let .Unknown(detail):
+        case let .UnexpectedStatus(status):
             writeInt(&buf, Int32(8))
+            FfiConverterUInt16.write(status, into: &buf)
+            
+        
+        case let .Unknown(detail):
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(detail, into: &buf)
             
         }

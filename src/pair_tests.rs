@@ -3,6 +3,8 @@
 //! a log.
 
 use super::*;
+use modelpipe::PairError;
+
 use crate::pair_error::MpUnreached;
 use crate::pipe::mp_connect;
 use crate::status::MpPipeStatus;
@@ -163,6 +165,9 @@ fn every_pair_error_is_a_sentence() {
         MpPairError::Unexpected {
             detail: "no device id".to_owned(),
         },
+        // Both arms: 404 has a sentence of its own.
+        MpPairError::UnexpectedStatus { status: 404 },
+        MpPairError::UnexpectedStatus { status: 503 },
         MpPairError::Unknown {
             detail: "Something".to_owned(),
         },
@@ -196,6 +201,11 @@ fn only_the_failures_that_could_pass_next_time_are_retryable() {
         }
         .is_retryable()
     );
+    // The reason this variant exists. Folded into `Unknown` it answered
+    // `true`, so an app offered a retry for a pairing that can never
+    // succeed; modelpipe says `false` and this must not disagree.
+    assert!(!MpPairError::UnexpectedStatus { status: 404 }.is_retryable());
+    assert!(!MpPairError::UnexpectedStatus { status: 503 }.is_retryable());
     assert!(
         !MpPairError::Unreached {
             why: MpUnreached::Closed { reason: None }
@@ -226,5 +236,76 @@ fn only_the_failures_that_could_pass_next_time_are_retryable() {
             retryable: false
         }
         .is_retryable()
+    );
+    // Both ways, or the arm could be the constant `false` and pass.
+    assert!(
+        MpPairError::Dial {
+            reason: String::new(),
+            retryable: true
+        }
+        .is_retryable()
+    );
+}
+
+/// What modelpipe hands over, and what crosses.
+///
+/// **The only test that drives `From<PairError>` for a status.** That matters
+/// more than it sounds: of the three places this crate matches on either side
+/// of this conversion, `is_retryable` and `Display` are exhaustive over
+/// `MpPairError` and refuse to compile without a new arm — and this one
+/// matches the *source*, `PairError`, which is `#[non_exhaustive]`, so its
+/// wildcard is mandatory and swallows anything unhandled. That is how a status
+/// added upstream arrived here as `Unknown`, rendering a Rust `Debug` string to
+/// a person and answering `is_retryable() == true` where modelpipe answers
+/// `false`. Other tests reach this conversion through `mp_pair`'s `?`, but only
+/// for `NoCode` and `Unreached` — never for an answer carrying a status.
+///
+/// So this asserts the crossing rather than the shape. Without it the arm
+/// above the wildcard can be deleted and every gate stays green.
+#[test]
+fn an_unexpected_status_crosses_as_a_number_rather_than_as_unknown() {
+    for status in [404u16, 503] {
+        assert_eq!(
+            MpPairError::from(PairError::UnexpectedStatus { status }),
+            MpPairError::UnexpectedStatus { status },
+            "the status crosses as itself, not folded into `Unknown`"
+        );
+    }
+
+    // The sentence a person is shown says which machine is at fault, and the
+    // 404 — the one anyone has traced to a version — says so in its own
+    // words. Neither renders a `Debug` string.
+    let old = MpPairError::from(PairError::UnexpectedStatus { status: 404 }).message();
+    assert!(old.contains("404") && old.contains("too old"), "{old}");
+    let other = MpPairError::from(PairError::UnexpectedStatus { status: 503 }).message();
+    assert!(
+        other.contains("503") && !other.contains("too old"),
+        "no status but the 404 has been traced to a version: {other}"
+    );
+    for message in [old, other] {
+        assert!(!message.contains("UnexpectedStatus"), "{message}");
+    }
+}
+
+/// The arms either side of the new one, which the wildcard would swallow
+/// just as quietly.
+///
+/// `Unexpected` survives upstream — modelpipe answers "an empty key or
+/// device" among others — so this is not the dead half of the split. And
+/// `Refused` is here because losing *it* is the same bug in a worse place:
+/// it would become `Unknown`, whose `is_retryable()` is true, so an app
+/// would offer to retry a code the far machine has already rejected.
+#[test]
+fn the_arms_either_side_of_a_status_still_cross_as_themselves() {
+    assert_eq!(
+        MpPairError::from(PairError::Unexpected("an empty key or device")),
+        MpPairError::Unexpected {
+            detail: "an empty key or device".to_owned()
+        }
+    );
+    assert_eq!(
+        MpPairError::from(PairError::Refused),
+        MpPairError::Refused,
+        "a refused code must not become a retryable `Unknown`"
     );
 }
