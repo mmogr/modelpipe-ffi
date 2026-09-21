@@ -46,13 +46,24 @@ name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
 [dependencies]
-# The whole point. The floor used to be whatever the serving side runs; 0.6
-# goes ahead of it on purpose. gglib 0.18.0 still serves on 0.5, and 0.6.0 is
-# the release that carries the pairing layer (`pair`, a connect-side identity,
-# `wait_reachable`, `peer_id`) this crate binds next. The connect half bound
-# today is unchanged from 0.5.0 apart from those additions, with the same ALPN,
-# dialer and ticket, so a serving side still on 0.5 is reached the same way.
-modelpipe = "0.6"
+# The whole point. This floor used to go *ahead* of the serving side on
+# purpose: the crate bound a pairing layer gglib did not yet serve. That is
+# over. gglib runs both halves out of one crate, `gglib-app-services`, and
+# that crate is on this same release — so the two are level, and the reason
+# to name a version here is no longer "reach further" than the desktop but
+# "answer the same way it does". (No gglib version is named on purpose: what
+# makes the sides level is which modelpipe it pins, and a version number here
+# is exactly what rotted in the sentence this replaces.)
+#
+# Spelled in full because a candidate has to be: `"0.7"` is a resolution
+# error rather than a loose match, since cargo will not take a pre-release
+# behind a plain caret. What this caret does accept is 0.7.0 itself and every
+# 0.7.x after it, so the line is edited once for the whole minor series. The
+# lock is what the XCFramework is built from, though, so moving to 0.7.0
+# final is a deliberate `cargo update -p modelpipe` and never a side effect —
+# and it has to happen before a release, because a candidate must not be
+# statically linked into something that ships to a phone.
+modelpipe = "0.7.0-rc.1"
 uniffi = { version = "0.32", features = ["tokio", "cli"] }
 # Multi-thread, because modelpipe's futures are all Send (its own
 # `future_promises` pins that) and the pipe should not stall on one worker.
