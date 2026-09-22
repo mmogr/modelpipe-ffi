@@ -139,7 +139,7 @@ let pipe = try await mpConnect(
         portMapping: false,
         discovery: false,
         relayOnly: false,
-        identityPath: nil
+        identityDir: nil
     )
 )
 
@@ -169,6 +169,85 @@ let metrics = pipe.networkMetrics()
 print("ok  metrics read: \(metrics.relayConnections) opened, "
     + "\(metrics.relayConnectionsFailed) failed, "
     + "\(metrics.relayConnectionsRatelimited) rate-limited")
+
+// 2b. The key file lands under the name the consuming app computes for
+//     itself, in a directory this library did not create.
+//
+//     The literal is written out here on purpose. ggchat names the same file
+//     in Swift, from its own `Ticket.digest`, and every device paired before
+//     this release holds a file under that name. If the two rules ever
+//     disagree nothing errors anywhere: every paired phone simply introduces
+//     itself to its desktop as a new device, for ever. This is the only place
+//     in this repository where the name the generated binding produces meets
+//     a hand-written expectation of what it should be, and it is deliberately
+//     re-derived here rather than asked of the library.
+//
+//     What it does NOT prove is agreement with ggchat, which computes the
+//     constant in its own language; that half is a test over there.
+let keyName = "0382e9033d890983.key"
+let keyDir = FileManager.default.temporaryDirectory
+    .appendingPathComponent("smoke-identity-\(UUID().uuidString)")
+try FileManager.default.createDirectory(at: keyDir, withIntermediateDirectories: true)
+let keyDirPath = keyDir.path(percentEncoded: false)
+
+func dialKeeping(identityDir: String?) async throws -> MpPipe {
+    try await mpConnect(
+        ticket: ticket,
+        options: MpConnectOptions(
+            port: nil, relayUrl: nil, portMapping: false, discovery: false,
+            relayOnly: false, identityDir: identityDir
+        )
+    )
+}
+
+let kept = try await dialKeeping(identityDir: keyDirPath)
+let keptId = kept.peerId()
+await kept.shutdown()
+
+// The exact contents, not `fileExists`: a leftover temporary from the
+// library's atomic write is also a failure, and an existence check walks
+// straight past one.
+let written = try FileManager.default.contentsOfDirectory(atPath: keyDirPath).sorted()
+guard written == [keyName] else {
+    fail("the key directory holds \(written), wanted [\(keyName)]")
+}
+let keyBytes = try Data(contentsOf: keyDir.appendingPathComponent(keyName))
+guard !keyBytes.isEmpty else {
+    fail("the key file is empty")
+}
+print("ok  the key is kept at \(keyName)")
+
+// The property the file exists for.
+let again = try await dialKeeping(identityDir: keyDirPath)
+let againId = again.peerId()
+await again.shutdown()
+guard keptId == againId else {
+    fail("one key file, and yet two devices: \(keptId) then \(againId)")
+}
+print("ok  a second dial is the same device")
+
+// And the negative: a directory that is not there is not made here. The app
+// creates it, private and out of its backups at the moment of creation, and
+// one made here would have neither property.
+let absent = keyDir.appendingPathComponent("not-made-here")
+let absentPath = absent.path(percentEncoded: false)
+do {
+    _ = try await dialKeeping(identityDir: absentPath)
+    fail("a dial into a directory that does not exist succeeded")
+} catch let error as MpError {
+    guard case .Identity = error, !error.isRetryable() else {
+        fail("expected a permanent Identity refusal, got \(error)")
+    }
+    guard error.message().contains(keyName) else {
+        fail("the refusal does not name the file: \(error.message())")
+    }
+}
+guard !FileManager.default.fileExists(atPath: absentPath) else {
+    fail("the library created the directory")
+}
+print("ok  a missing directory is refused, not created")
+
+try? FileManager.default.removeItem(at: keyDir)
 
 // 3. The async path. This is the one that hangs rather than errors if the
 //    library's runtime was never started, so it is the reason this script
@@ -214,7 +293,7 @@ let fresh = try await mpConnect(
     ticket: ticket,
     options: MpConnectOptions(
         port: nil, relayUrl: nil, portMapping: false, discovery: false,
-        relayOnly: false, identityPath: nil
+        relayOnly: false, identityDir: nil
     )
 )
 do {
@@ -270,7 +349,7 @@ do {
         pairing: "\(ticket)-123456", label: "smoke",
         options: MpConnectOptions(
             port: nil, relayUrl: nil, portMapping: false, discovery: false,
-            relayOnly: false, identityPath: nil
+            relayOnly: false, identityDir: nil
         ),
         reachWithinMs: 150
     )

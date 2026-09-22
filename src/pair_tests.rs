@@ -5,6 +5,7 @@
 use super::*;
 use modelpipe::PairError;
 
+use crate::identity_file::identity_file_tests::{GOOD_TICKET_KEY, Scratch};
 use crate::pair_error::MpUnreached;
 use crate::pipe::mp_connect;
 use crate::status::MpPipeStatus;
@@ -307,5 +308,115 @@ fn the_arms_either_side_of_a_status_still_cross_as_themselves() {
         MpPairError::from(PairError::Refused),
         MpPairError::Refused,
         "a refused code must not become a retryable `Unknown`"
+    );
+}
+
+/// A pairing keeps its key where a later dial to that machine will look for
+/// it.
+///
+/// Nothing is listening, so the exchange never happens and the code is never
+/// presented — but the key is minted while the pipe is being bound, which is
+/// before any of that, so the file is there to assert on. It has to carry the
+/// same name `mp_connect` gives it: the app introduces this device as it
+/// redeems the code, and a pairing that wrote a different file would
+/// introduce a device that never dials again. Nothing else in this crate
+/// checks that the two halves agree.
+#[tokio::test]
+async fn pairing_keeps_its_key_in_the_directory_it_was_given() {
+    let scratch = Scratch::new("pairing-keeps-its-key");
+
+    let error = mp_pair(
+        format!("{GOOD_TICKET}-123456"),
+        Some("Phone".to_owned()),
+        MpConnectOptions {
+            identity_dir: Some(scratch.as_str().to_owned()),
+            ..offline_options()
+        },
+        150,
+    )
+    .await
+    .expect_err("nothing is listening at the vector ticket");
+
+    assert!(matches!(error, MpPairError::Unreached { .. }), "{error:?}");
+    assert_eq!(scratch.entries(), vec![GOOD_TICKET_KEY.to_owned()]);
+}
+
+/// A directory that is not there fails a pairing the way it fails a dial,
+/// flattened into the one case `MpPairError` has for a dial that did not
+/// start.
+#[tokio::test]
+async fn a_directory_that_is_not_there_makes_pairing_fail_as_a_dial() {
+    let scratch = Scratch::new("pairing-directory-not-created");
+    let absent = scratch.path().join("not-made-here");
+
+    let error = mp_pair(
+        format!("{GOOD_TICKET}-123456"),
+        None,
+        MpConnectOptions {
+            identity_dir: Some(absent.to_str().expect("UTF-8").to_owned()),
+            ..offline_options()
+        },
+        150,
+    )
+    .await
+    .expect_err("there is nowhere to write the key");
+
+    assert!(
+        matches!(
+            error,
+            MpPairError::Dial {
+                retryable: false,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert!(
+        error.message().contains(GOOD_TICKET_KEY),
+        "the refusal does not name the file: {}",
+        error.message()
+    );
+    assert!(!absent.exists(), "the directory was created after all");
+}
+
+/// A pairing heals its key too, which a pairing could not do before.
+///
+/// `MpPairError` folds every transport failure into one case carrying a
+/// sentence, so nothing above this boundary can tell an unusable key from a
+/// machine that is switched off without reading modelpipe's words back. The
+/// retry is written underneath that, against modelpipe's own
+/// `PairError::Connect(ConnectError::Identity)`, so the distinction is used
+/// where it still exists and no new case crosses into Swift.
+///
+/// Reaching `Unreached` is the assertion: it means the dial got past the key
+/// file and went looking for the far machine, which is as far as anything can
+/// go with nothing listening. Before the retry this was `Dial`, and the
+/// pairing stopped at the key.
+#[tokio::test]
+async fn a_key_pairing_cannot_use_is_replaced_and_pairing_goes_on() {
+    let scratch = Scratch::new("pairing-heals-its-key");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    std::fs::write(&path, b"not a key at all\n").expect("writable");
+
+    let error = mp_pair(
+        format!("{GOOD_TICKET}-123456"),
+        None,
+        MpConnectOptions {
+            identity_dir: Some(scratch.as_str().to_owned()),
+            ..offline_options()
+        },
+        150,
+    )
+    .await
+    .expect_err("nothing is listening at the vector ticket");
+
+    assert!(
+        matches!(error, MpPairError::Unreached { .. }),
+        "the pairing stopped at the key rather than at the far machine: {error:?}"
+    );
+    let now = std::fs::read(&path).expect("a key was minted in its place");
+    assert_ne!(
+        now, b"not a key at all\n",
+        "the unusable key is still there"
     );
 }

@@ -9,9 +9,23 @@
 
 use super::*;
 
+use crate::identity_file::identity_file_tests::{GOOD_TICKET_KEY, Scratch};
+
 /// modelpipe's normative ticket vector 1: well-formed, and names an endpoint
 /// nothing is listening on.
 const GOOD_TICKET: &str = "pipeadlvvgabqkyqvn6vjp7nhslea45a5yls6pnkmizfv4bbu2hxa5iruaaauhlp2na";
+
+/// modelpipe's `accept/one-ipv6` vector: a second well-formed ticket, so a
+/// test can tell one machine's key from another's.
+const OTHER_TICKET: &str = "pipeadlvvgabqkyqvn6vjp7nhslea45a5yls6pnkmizfv4bbu2hxa5iruaicaajcaainxaaaaaaaaaaaaaaaaaaach4qaabstehw";
+
+/// [`offline_options`] with a directory to keep the key in.
+fn keeping_a_key_in(dir: &Scratch) -> MpConnectOptions {
+    MpConnectOptions {
+        identity_dir: Some(dir.as_str().to_owned()),
+        ..offline_options()
+    }
+}
 
 /// Dial with discovery and port mapping off, so a test never touches n0's
 /// discovery service or asks the router for anything.
@@ -302,4 +316,253 @@ async fn dropping_a_pipe_from_inside_the_runtime_still_closes_it() {
     .await
     .expect("the courtesy close runs from inside the runtime too");
     assert_eq!(closed, Some(modelpipe::PipeStatus::Closed));
+}
+
+/// The key lands in the directory it was given, under the name the app
+/// computes for itself.
+///
+/// The literal is the point. `GOOD_TICKET_KEY` is what ggchat's own
+/// `Ticket.digest` produced in Swift before this crate named anything, so a
+/// device paired on 0.3.x already holds a file under it. Asserting the exact
+/// contents of the directory rather than that the file exists, because a
+/// leftover `private_file` temporary is also a failure and an `exists` check
+/// steps straight over one.
+#[tokio::test]
+async fn a_dial_keeps_its_key_in_the_directory_it_was_given() {
+    let scratch = Scratch::new("dial-keeps-its-key");
+
+    let pipe = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("binds");
+    pipe.shutdown().await;
+
+    assert_eq!(scratch.entries(), vec![GOOD_TICKET_KEY.to_owned()]);
+    let key = std::fs::read(scratch.path().join(GOOD_TICKET_KEY)).expect("the key is readable");
+    assert!(!key.is_empty(), "the key file is empty");
+}
+
+/// The whole point of keeping a key: the far machine sees one device.
+#[tokio::test]
+async fn two_dials_on_one_ticket_are_one_device() {
+    let scratch = Scratch::new("two-dials-one-device");
+
+    let first = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("binds");
+    let first_id = first.peer_id();
+    first.shutdown().await;
+
+    let second = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("binds");
+    let second_id = second.peer_id();
+    second.shutdown().await;
+
+    assert_eq!(first_id, second_id, "one key file, and yet two devices");
+    assert_eq!(scratch.entries(), vec![GOOD_TICKET_KEY.to_owned()]);
+}
+
+/// Two machines are two keys, and therefore two devices.
+///
+/// A name that ignored the ticket would pass every other test in this file
+/// and fail this one: both dials would share a key and the phone would
+/// present one endpoint to two desktops, which is the thing a relay's
+/// one-connection-per-endpoint rule makes unworkable.
+#[tokio::test]
+async fn two_tickets_keep_two_keys() {
+    let scratch = Scratch::new("two-tickets-two-keys");
+
+    let one = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("binds");
+    let one_id = one.peer_id();
+    one.shutdown().await;
+
+    let other = mp_connect(OTHER_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("binds");
+    let other_id = other.peer_id();
+    other.shutdown().await;
+
+    let entries = scratch.entries();
+    assert_eq!(
+        entries.len(),
+        2,
+        "two machines did not get two files: {entries:?}"
+    );
+    assert!(entries.contains(&GOOD_TICKET_KEY.to_owned()), "{entries:?}");
+    assert_ne!(one_id, other_id, "two machines met the same device");
+}
+
+/// No directory, no file — and a fresh device every time, which is what
+/// every version before this one did.
+#[tokio::test]
+async fn no_directory_leaves_nothing_behind() {
+    let scratch = Scratch::new("no-directory-nothing-behind");
+
+    let first = mp_connect(GOOD_TICKET.to_owned(), offline_options())
+        .await
+        .expect("binds");
+    let first_id = first.peer_id();
+    first.shutdown().await;
+
+    let second = mp_connect(GOOD_TICKET.to_owned(), offline_options())
+        .await
+        .expect("binds");
+    let second_id = second.peer_id();
+    second.shutdown().await;
+
+    assert_ne!(
+        first_id, second_id,
+        "a dial keeping no key reported the same device twice, so this test proves nothing"
+    );
+    assert!(scratch.entries().is_empty());
+}
+
+/// A directory that is not there is not made here.
+///
+/// The app creates it, `0o700` at creation and out of its backups, and one
+/// made here would have neither property until the app's next call. So this
+/// is a refusal that names the file, and it is permanent.
+#[tokio::test]
+async fn a_directory_that_is_not_there_is_not_created() {
+    let scratch = Scratch::new("directory-not-created");
+    let absent = scratch.path().join("not-made-here");
+
+    let error = mp_connect(
+        GOOD_TICKET.to_owned(),
+        MpConnectOptions {
+            identity_dir: Some(absent.to_str().expect("UTF-8").to_owned()),
+            ..offline_options()
+        },
+    )
+    .await
+    .expect_err("there is nowhere to write the key");
+
+    assert!(matches!(error, MpError::Identity { .. }), "{error:?}");
+    assert!(!error.is_retryable());
+    assert!(
+        error.message().contains(GOOD_TICKET_KEY),
+        "the refusal does not name the file: {}",
+        error.message()
+    );
+    assert!(!absent.exists(), "the directory was created after all");
+}
+
+/// A key this side cannot use is thrown away and the dial tried once more.
+///
+/// modelpipe refuses a key file that is not a key, or that somebody else can
+/// read, and says so permanently. The remedies it names are deleting the file
+/// and starting again, or `chmod 600` for the second — and on a phone there
+/// is nobody to do either. The cost of throwing it away is this device's
+/// fingerprint on the far machine, which records fingerprints and does not
+/// pin them; the alternative is a device that can never dial that machine
+/// again.
+#[tokio::test]
+async fn a_key_this_side_cannot_use_is_replaced_and_the_dial_succeeds() {
+    let scratch = Scratch::new("unusable-key-replaced");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    std::fs::write(&path, b"not a key at all\n").expect("writable");
+
+    let pipe = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("the unusable key was thrown away and the dial tried again");
+    pipe.shutdown().await;
+
+    let now = std::fs::read(&path).expect("a key was minted in its place");
+    assert_ne!(
+        now, b"not a key at all\n",
+        "the unusable key is still there"
+    );
+    assert_eq!(scratch.entries(), vec![GOOD_TICKET_KEY.to_owned()]);
+}
+
+/// A key half written is the shape a crash used to leave behind.
+///
+/// modelpipe before 0.7.0-rc.1 wrote the key into the file in two steps, so a
+/// process killed between them left nothing in it — and an empty file is not
+/// a key, so every later dial to that machine was refused for ever. 0.6 is
+/// what the devices upgrading to this release are running, so this is the
+/// file that is actually out there. 0.7 writes atomically and cannot produce
+/// one any more; it still refuses one, deliberately, rather than minting over
+/// a path it does not own. Throwing it away is this side's job because this
+/// side owns the name.
+#[tokio::test]
+async fn an_empty_key_file_is_replaced() {
+    let scratch = Scratch::new("empty-key-replaced");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    std::fs::write(&path, b"").expect("writable");
+
+    let pipe = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("the empty key was thrown away and the dial tried again");
+    pipe.shutdown().await;
+
+    assert!(
+        !std::fs::read(&path)
+            .expect("a key was minted in its place")
+            .is_empty(),
+        "the key file is still empty"
+    );
+}
+
+/// Once, and only when something was thrown away.
+///
+/// A directory standing where the key belongs cannot be removed, so there is
+/// nothing to throw away and the refusal goes to the caller rather than
+/// starting a second dial. It is the portable way to reach that arm:
+/// `remove_file` on a directory fails on both hosts this is built for, where
+/// a read-only directory would simply not stop a superuser.
+#[tokio::test]
+async fn a_key_file_that_is_a_directory_is_not_discarded() {
+    let scratch = Scratch::new("key-is-a-directory");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    std::fs::create_dir(&path).expect("writable");
+
+    let error = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect_err("a directory is not a key and cannot be thrown away");
+
+    assert!(matches!(error, MpError::Identity { .. }), "{error:?}");
+    assert!(!error.is_retryable());
+    assert!(path.is_dir(), "the directory was removed after all");
+}
+
+/// A failure that is not about the key leaves the key alone.
+///
+/// The discard is the one destructive thing this crate does, so what triggers
+/// it is worth a test of its own: only modelpipe saying it could not use the
+/// key file. A dial refused for any other reason — here an unusable relay —
+/// must not cost this device its fingerprint on a machine it has already
+/// introduced itself to.
+#[tokio::test]
+async fn a_failure_that_is_not_about_the_key_leaves_it_alone() {
+    let scratch = Scratch::new("other-failure-keeps-the-key");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+
+    let pipe = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("binds");
+    pipe.shutdown().await;
+    let minted = std::fs::read(&path).expect("a key was minted");
+
+    let error = mp_connect(
+        GOOD_TICKET.to_owned(),
+        MpConnectOptions {
+            relay_url: Some("not a relay url".to_owned()),
+            ..keeping_a_key_in(&scratch)
+        },
+    )
+    .await
+    .expect_err("an unusable relay is not a dial");
+
+    assert!(
+        !matches!(error, MpError::Identity { .. }),
+        "this test needs a failure that is not about the key, got {error:?}"
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("the key is still there"),
+        minted,
+        "a failure that had nothing to do with the key threw it away"
+    );
 }

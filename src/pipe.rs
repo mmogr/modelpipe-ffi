@@ -4,9 +4,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use modelpipe::{ConnectHandle, Ticket};
+use modelpipe::{ConnectError, ConnectHandle, Ticket};
 
 use crate::error::MpError;
+use crate::identity_file;
 use crate::options::MpConnectOptions;
 use crate::pair_error::MpUnreached;
 use crate::runtime::runtime;
@@ -58,8 +59,31 @@ pub async fn mp_connect(ticket: String, options: MpConnectOptions) -> Result<Arc
     // Parsed first, and on the caller's thread: a malformed ticket should cost
     // nothing and should not be indistinguishable from a machine that is away.
     let ticket = Ticket::from_str(&ticket)?;
-    let handle = modelpipe::connect(&ticket, options.apply()).await?;
-    Ok(Arc::new(MpPipe::new(handle)))
+    // Named from the parsed ticket, never from the string that arrived: the
+    // two differ for tickets that are perfectly valid, and the file's name is
+    // a contract with the app rather than this crate's business alone.
+    let identity = identity_file::resolve(options.identity_dir.as_deref(), &ticket);
+    match modelpipe::connect(&ticket, options.apply(identity.as_deref())).await {
+        Ok(handle) => Ok(Arc::new(MpPipe::new(handle))),
+        // Matched against modelpipe's own error, before the `From` below
+        // flattens it. Exactly once, and only when a file was actually
+        // removed: with nothing thrown away the refusal is about the
+        // directory rather than the key, and dialling again fails the same
+        // way. Straight-line rather than a loop, because "once" is the whole
+        // of the rule. The same six lines are in `mp_pair`, against the
+        // variant that wraps this one; a combinator over two error types and
+        // two results would hide the predicate, which is the only part worth
+        // reading.
+        Err(error) => {
+            let discarded = matches!(error, ConnectError::Identity { .. })
+                && identity.as_deref().is_some_and(identity_file::discard);
+            if !discarded {
+                return Err(error.into());
+            }
+            let handle = modelpipe::connect(&ticket, options.apply(identity.as_deref())).await?;
+            Ok(Arc::new(MpPipe::new(handle)))
+        }
+    }
 }
 
 impl MpPipe {
@@ -95,7 +119,14 @@ impl MpPipe {
     }
 
     /// Who this device connects as: its endpoint id, sixty-four hex
-    /// characters, stable across launches when `identityPath` is set.
+    /// characters.
+    ///
+    /// Stable across launches when `identityDir` is set **and the same ticket
+    /// is dialled**: the key is one file per far machine, named from the
+    /// ticket, so a machine that mints a new ticket is met as a new device.
+    /// A key this side cannot use is thrown away and replaced rather than
+    /// refused, so this can also differ from last launch with nothing else
+    /// changed.
     pub fn peer_id(&self) -> String {
         self.handle.peer_id().to_string()
     }
