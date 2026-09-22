@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.3.0...build/v0.4.0) - 2026-09-22
+
+### Added
+
+- *(options)* [**breaking**] a dial is told which directory to keep its key in, not which file ([#30](https://github.com/mmogr/modelpipe-ffi/pull/30))
+- *(pair)* [**breaking**] a pairing answer's unexpected status crosses as a number ([#29](https://github.com/mmogr/modelpipe-ffi/pull/29))
+
+### Other
+
+- *(deps)* the lock resolves modelpipe 0.7.0 ([#32](https://github.com/mmogr/modelpipe-ffi/pull/32))
+- *(deps)* bump release-plz/action from 0.5.133 to 0.5.136 ([#25](https://github.com/mmogr/modelpipe-ffi/pull/25))
+- *(release)* pin the v0.3.0 XCFramework checksum
+
 ## [0.3.0](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.2.0...build/v0.3.0) - 2026-09-16
 
 ### Added
