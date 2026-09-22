@@ -630,7 +630,11 @@ public protocol MpPipeProtocol: AnyObject, Sendable {
     
     /**
      * Who this device connects as: its endpoint id, sixty-four hex
-     * characters, stable across launches when `identityPath` is set.
+     * characters.
+     *
+     * Stable across launches when `identityDir` is set **and the same ticket
+     * is dialled**: the key is one file per far machine, named from the
+     * ticket, so a machine that mints a new ticket is met as a new device.
      */
     func peerId()  -> String
     
@@ -832,7 +836,11 @@ open func notifyNetworkChange()async   {
     
     /**
      * Who this device connects as: its endpoint id, sixty-four hex
-     * characters, stable across launches when `identityPath` is set.
+     * characters.
+     *
+     * Stable across launches when `identityDir` is set **and the same ticket
+     * is dialled**: the key is one file per far machine, named from the
+     * ticket, so a machine that mints a new ticket is met as a new device.
      */
 open func peerId() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
@@ -1237,15 +1245,30 @@ public struct MpConnectOptions: Equatable, Hashable {
      */
     public var relayOnly: Bool
     /**
-     * Where this device keeps its endpoint key, so the far machine sees the
-     * same device every time. `None` mints a fresh one per process.
+     * The directory this device keeps its endpoint keys in, so the far
+     * machine sees the same device every time. `None` mints a fresh key per
+     * process and writes nothing.
      *
-     * Written readable only by this user and refused when others can read
-     * it, as modelpipe's own serve side does with its key; on Windows the
-     * directory is the only protection. Appended last: `UniFFI` emits the
-     * Swift memberwise initialiser in declaration order.
+     * A directory rather than a file, because the file is one per far
+     * machine — a relay allows a single live connection per endpoint id, so
+     * a device holding two machines has to meet each as a different device —
+     * and naming it takes the parsed ticket, which this record has never
+     * had. `crate::identity_file` has the rule and why it is a contract with
+     * the app rather than a detail of this crate.
+     *
+     * **The directory has to be there already.** Nothing here creates one:
+     * an app that wants its keys unreadable by others and out of its backups
+     * sets both as the directory is made, and neither survives being applied
+     * after the fact. A directory that is missing or cannot be written
+     * arrives as [`MpError::Identity`](crate::MpError::Identity), which
+     * names the file and is permanent.
+     *
+     * The file itself is modelpipe's: written readable only by this user and
+     * refused when others can read it, as its own serve side does; on
+     * Windows the directory is the only protection. Appended last: `UniFFI`
+     * emits the Swift memberwise initialiser in declaration order.
      */
-    public var identityPath: String?
+    public var identityDir: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1278,20 +1301,35 @@ public struct MpConnectOptions: Equatable, Hashable {
          * which is otherwise hard to force.
          */relayOnly: Bool = false, 
         /**
-         * Where this device keeps its endpoint key, so the far machine sees the
-         * same device every time. `None` mints a fresh one per process.
+         * The directory this device keeps its endpoint keys in, so the far
+         * machine sees the same device every time. `None` mints a fresh key per
+         * process and writes nothing.
          *
-         * Written readable only by this user and refused when others can read
-         * it, as modelpipe's own serve side does with its key; on Windows the
-         * directory is the only protection. Appended last: `UniFFI` emits the
-         * Swift memberwise initialiser in declaration order.
-         */identityPath: String? = nil) {
+         * A directory rather than a file, because the file is one per far
+         * machine — a relay allows a single live connection per endpoint id, so
+         * a device holding two machines has to meet each as a different device —
+         * and naming it takes the parsed ticket, which this record has never
+         * had. `crate::identity_file` has the rule and why it is a contract with
+         * the app rather than a detail of this crate.
+         *
+         * **The directory has to be there already.** Nothing here creates one:
+         * an app that wants its keys unreadable by others and out of its backups
+         * sets both as the directory is made, and neither survives being applied
+         * after the fact. A directory that is missing or cannot be written
+         * arrives as [`MpError::Identity`](crate::MpError::Identity), which
+         * names the file and is permanent.
+         *
+         * The file itself is modelpipe's: written readable only by this user and
+         * refused when others can read it, as its own serve side does; on
+         * Windows the directory is the only protection. Appended last: `UniFFI`
+         * emits the Swift memberwise initialiser in declaration order.
+         */identityDir: String? = nil) {
         self.port = port
         self.relayUrl = relayUrl
         self.portMapping = portMapping
         self.discovery = discovery
         self.relayOnly = relayOnly
-        self.identityPath = identityPath
+        self.identityDir = identityDir
     }
 
     
@@ -1315,7 +1353,7 @@ public struct FfiConverterTypeMpConnectOptions: FfiConverterRustBuffer {
                 portMapping: FfiConverterBool.read(from: &buf), 
                 discovery: FfiConverterBool.read(from: &buf), 
                 relayOnly: FfiConverterBool.read(from: &buf), 
-                identityPath: FfiConverterOptionString.read(from: &buf)
+                identityDir: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -1325,7 +1363,7 @@ public struct FfiConverterTypeMpConnectOptions: FfiConverterRustBuffer {
         FfiConverterBool.write(value.portMapping, into: &buf)
         FfiConverterBool.write(value.discovery, into: &buf)
         FfiConverterBool.write(value.relayOnly, into: &buf)
-        FfiConverterOptionString.write(value.identityPath, into: &buf)
+        FfiConverterOptionString.write(value.identityDir, into: &buf)
     }
 }
 
@@ -1738,13 +1776,17 @@ enum MpError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
      */
     case PeerUnreachable
     /**
-     * `identityPath` names a file this side cannot use as its endpoint key:
-     * one that is not a key, one others can read, or one it cannot read or
-     * write. Permanent, because the path is the caller's.
+     * The key file under `identityDir` cannot be used as this side's
+     * endpoint key: one that is not a key, one others can read, or one it
+     * cannot read or write — including the case where the directory itself
+     * is missing, since nothing here creates one.
+     *
+     * Permanent. The file's *name* is this crate's, but the directory it
+     * sits in is the caller's, and that is what is left to fix.
      */
     case Identity(
         /**
-         * The offending path. A path is not a credential, so it is shown.
+         * The offending file. A path is not a credential, so it is shown.
          */path: String
     )
     /**
@@ -2636,7 +2678,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_modelpipe_ffi_checksum_method_mppipe_notify_network_change() != 51570) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_modelpipe_ffi_checksum_method_mppipe_peer_id() != 45777) {
+    if (uniffi_modelpipe_ffi_checksum_method_mppipe_peer_id() != 38103) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_modelpipe_ffi_checksum_method_mppipe_port() != 13940) {

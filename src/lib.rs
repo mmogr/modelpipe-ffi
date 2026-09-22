@@ -118,6 +118,7 @@
 //! screen is dismissed.
 
 mod error;
+mod identity_file;
 mod options;
 mod pair;
 mod pair_error;

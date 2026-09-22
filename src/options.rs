@@ -13,6 +13,8 @@
 //! token belongs to the HTTP client the app points at the base URL, and it is
 //! deliberately impossible to hand one to this crate.
 
+use std::path::Path;
+
 use modelpipe::ConnectOptions;
 
 /// Options for a dial. `MpConnectOptions::default()` is the right answer
@@ -51,15 +53,30 @@ pub struct MpConnectOptions {
     #[uniffi(default = false)]
     pub relay_only: bool,
 
-    /// Where this device keeps its endpoint key, so the far machine sees the
-    /// same device every time. `None` mints a fresh one per process.
+    /// The directory this device keeps its endpoint keys in, so the far
+    /// machine sees the same device every time. `None` mints a fresh key per
+    /// process and writes nothing.
     ///
-    /// Written readable only by this user and refused when others can read
-    /// it, as modelpipe's own serve side does with its key; on Windows the
-    /// directory is the only protection. Appended last: `UniFFI` emits the
-    /// Swift memberwise initialiser in declaration order.
+    /// A directory rather than a file, because the file is one per far
+    /// machine — a relay allows a single live connection per endpoint id, so
+    /// a device holding two machines has to meet each as a different device —
+    /// and naming it takes the parsed ticket, which this record has never
+    /// had. `crate::identity_file` has the rule and why it is a contract with
+    /// the app rather than a detail of this crate.
+    ///
+    /// **The directory has to be there already.** Nothing here creates one:
+    /// an app that wants its keys unreadable by others and out of its backups
+    /// sets both as the directory is made, and neither survives being applied
+    /// after the fact. A directory that is missing or cannot be written
+    /// arrives as [`MpError::Identity`](crate::MpError::Identity), which
+    /// names the file and is permanent.
+    ///
+    /// The file itself is modelpipe's: written readable only by this user and
+    /// refused when others can read it, as its own serve side does; on
+    /// Windows the directory is the only protection. Appended last: `UniFFI`
+    /// emits the Swift memberwise initialiser in declaration order.
     #[uniffi(default = None)]
-    pub identity_path: Option<String>,
+    pub identity_dir: Option<String>,
 }
 
 impl Default for MpConnectOptions {
@@ -70,19 +87,27 @@ impl Default for MpConnectOptions {
             port_mapping: true,
             discovery: true,
             relay_only: false,
-            identity_path: None,
+            identity_dir: None,
         }
     }
 }
 
 impl MpConnectOptions {
-    /// Build modelpipe's options from these.
+    /// Build modelpipe's options from these, with `identity` as the file to
+    /// keep this device's key in.
+    ///
+    /// The path is an argument rather than a field read here because naming
+    /// the file takes the parsed ticket, and this record holds no ticket and
+    /// should not start to: it is the same record for a dial and for a
+    /// pairing, which arrive at their ticket by different routes. Passing
+    /// `None` keeps no key, whatever `identity_dir` says, which is what makes
+    /// `apply` worth testing on its own.
     ///
     /// `default()`-then-assign because `ConnectOptions` is `#[non_exhaustive]`
     /// and a struct literal will not compile from outside its crate. That is
     /// upstream working as intended: a field added there arrives here as a
     /// default rather than as a build failure.
-    pub(crate) fn apply(&self) -> ConnectOptions {
+    pub(crate) fn apply(&self, identity: Option<&Path>) -> ConnectOptions {
         let mut opts = ConnectOptions::default();
         opts.bind = self
             .port
@@ -91,7 +116,7 @@ impl MpConnectOptions {
         opts.port_mapping = self.port_mapping;
         opts.discovery = self.discovery;
         opts.relay_only = self.relay_only;
-        opts.identity = self.identity_path.as_ref().map(std::path::PathBuf::from);
+        opts.identity = identity.map(Path::to_path_buf);
         opts
     }
 }

@@ -54,11 +54,43 @@ and nothing on an iPhone wants to be a backend.
 | `pipe.networkMetrics()` | Relay counters, including rate limiting. |
 | `pipe.shutdown()` | Idempotent and terminal. |
 | `pipe.waitReachable(withinMs:)` | Waits until the far machine is reached and says how it is routed, or throws `MpUnreached`; a timeout tears nothing down. |
-| `pipe.peerId()` | Who this device connects as: sixty-four hex characters, stable across launches when `identityPath` is set. |
+| `pipe.peerId()` | Who this device connects as: sixty-four hex characters, stable across launches when `identityDir` is set and the same ticket is dialled. |
 | `mpPair(pairing:label:options:reachWithinMs:)` | Dial, wait to reach the far machine, redeem the code, and return `MpPaired`: the pipe still up, this device's key, the name it is held under, and the far machine's id. The key is returned once and never kept here. |
 | `mpReadPairing(pairing:)` | Read a pairing string without pairing, synchronously: the ticket in canonical form and whether there is a code, so a form can accept a paste as it is typed and know whether to ask for a token. The code never comes back. Throws `MpPairError.BadPairingString`. |
-| `MpConnectOptions.identityPath` | Where this device keeps its endpoint key, so the far machine sees the same device every time. `nil` mints one per process. |
+| `MpConnectOptions.identityDir` | The directory this device keeps its endpoint keys in, so the far machine sees the same device every time — one file per far machine, named below. `nil` mints a key per process and writes nothing. |
 | `pipe.watch()` | A cancellable wait on the status sequence: `watch.next(snapshot:)` answers like `statusChangedSince`, and `watch.cancel()` ends it, before or during the wait. |
+
+### Where a device keeps its key
+
+`identityDir` is a **directory**, and this library names the file in it: one
+per far machine, called `<digest>.key`, where the digest is the first eight
+bytes of SHA-256 over the ticket **in its canonical form**, as sixteen
+lower-case hex characters. modelpipe's normative ticket vector 1 is
+`0382e9033d890983.key`.
+
+That is a contract with the consuming app rather than an implementation
+detail. ggchat computed the same name in Swift before this library named
+anything, and every device already paired holds a file under it — so a
+different name would fail nowhere and simply make every paired phone
+introduce itself to its desktop as a new device, for ever.
+`src/identity_file_tests.rs` pins the bytes against modelpipe's own vectors,
+including the one whose spelling changes on the way in.
+
+**The canonical form, not the string that was passed in.** A ticket is parsed
+before it is hashed, because modelpipe's `Display` sorts and deduplicates
+addresses, drops an address tag it does not know, and lower-cases. So the
+same machine written two ways is one file — and hashing the argument would
+have given it two.
+
+One file per machine because a relay allows a single live connection per
+endpoint id: a device holding two machines has to meet each of them as a
+different device, or the second dial takes the first's relay path away.
+
+**The directory has to be there already.** Nothing here creates one. An app
+that wants its keys unreadable by others and out of its backups sets both as
+the directory is made, and neither survives being applied afterwards. A
+directory that is missing or cannot be written is `MpError.Identity`, which
+names the file and is not retryable.
 
 ### No credential is accepted across this boundary
 

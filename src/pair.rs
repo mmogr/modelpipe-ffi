@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use modelpipe::PairingString;
 
+use crate::identity_file;
 use crate::options::MpConnectOptions;
 use crate::pair_error::MpPairError;
 use crate::pipe::MpPipe;
@@ -54,10 +55,13 @@ pub async fn mp_pair(
     reach_within_ms: u64,
 ) -> Result<MpPaired, MpPairError> {
     let pairing = PairingString::from_str(&pairing)?;
+    // The same file a later dial to this machine will carry, so the endpoint
+    // recorded beside the key as it is minted is the one that then chats.
+    let identity = identity_file::resolve(options.identity_dir.as_deref(), pairing.ticket());
     let paired = modelpipe::pair(
         &pairing,
         label.as_deref(),
-        options.apply(),
+        options.apply(identity.as_deref()),
         Duration::from_millis(reach_within_ms),
     )
     .await?;

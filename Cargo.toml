@@ -72,6 +72,16 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 # between a check and a wait registration is never lost. Already in the
 # lock, pulled in underneath modelpipe by iroh.
 tokio-util = "0.7"
+# SHA-256, for the name of the file a device keeps its endpoint key in. That
+# name is a contract with ggchat, which computes the same one in Swift, so the
+# hash has to be this one and not whatever else is already in the graph.
+# Already in the lock underneath iroh via ed25519-dalek, so this names it
+# rather than adding it.
+#
+# No default features. `oid` is on by default and turns on `digest/oid`, which
+# would add a `const-oid` edge and an OID table to a static library that ships
+# to a phone. `Digest::digest` is behind neither that nor `alloc`.
+sha2 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

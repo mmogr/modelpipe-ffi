@@ -1870,6 +1870,7 @@ name = "modelpipe-ffi"
 version = "0.3.0"
 dependencies = [
  "modelpipe",
+ "sha2",
  "tokio",
  "tokio-util",
  "uniffi",

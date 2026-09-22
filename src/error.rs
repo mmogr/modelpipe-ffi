@@ -52,11 +52,15 @@ pub enum MpError {
     },
     /// The far machine could not be reached at all.
     PeerUnreachable,
-    /// `identityPath` names a file this side cannot use as its endpoint key:
-    /// one that is not a key, one others can read, or one it cannot read or
-    /// write. Permanent, because the path is the caller's.
+    /// The key file under `identityDir` cannot be used as this side's
+    /// endpoint key: one that is not a key, one others can read, or one it
+    /// cannot read or write — including the case where the directory itself
+    /// is missing, since nothing here creates one.
+    ///
+    /// Permanent. The file's *name* is this crate's, but the directory it
+    /// sits in is the caller's, and that is what is left to fix.
     Identity {
-        /// The offending path. A path is not a credential, so it is shown.
+        /// The offending file. A path is not a credential, so it is shown.
         path: String,
     },
     /// Something modelpipe grew that this build does not know about.
@@ -142,7 +146,8 @@ impl fmt::Display for MpError {
             Self::Identity { path } => write!(
                 f,
                 "The identity file at {path} cannot be used: it is not a key, someone else can \
-                 read it, or it cannot be read or written. Choose another path or remove it."
+                 read it, or it cannot be read or written. Remove it, or keep keys in a \
+                 directory this app can write to."
             ),
             Self::PeerUnreachable => write!(
                 f,

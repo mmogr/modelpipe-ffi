@@ -15,11 +15,23 @@ verbatim and the serve edge is the only thing that checks it. The token belongs
 to whatever HTTP client the app points at `baseUrl()`; after a pairing, that is
 the key `mpPair` returned.
 
-An **identity file**, when `identityPath` is set: this device's endpoint key,
+An **identity file**, when `identityDir` is set: this device's endpoint key,
 written readable only by this user and refused when others can read it, as
 modelpipe's serve side does with its own. On Windows there is no mode to set,
 so the directory is the only protection. Deleting it changes the fingerprint
 the far machine records for this device.
+
+The directory is the app's: this library names the file inside it and never
+creates the directory, so the mode it is made with and whether a backup
+carries it are decisions only the app can make. **The name is a truncated
+SHA-256 of the ticket the key is for**, which means anyone who can both list
+that directory and already hold a candidate ticket can confirm in one hash
+that this device has connected to that machine. Recovering the ticket from a
+name is not a sixty-four-bit search — a ticket carries a public key, so a
+preimage has to land in a space far larger than the digest is wide, and a
+sixty-four-bit collision is not *the* ticket. Confirming a guess is what is
+free, and that is a property of naming the file after the ticket at all rather
+than of this library's choice of digest.
 
 ## What is asserted rather than promised
 
