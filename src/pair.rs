@@ -5,7 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use modelpipe::PairingString;
+use modelpipe::{ConnectError, PairError, PairingString};
 
 use crate::identity_file;
 use crate::options::MpConnectOptions;
@@ -58,13 +58,36 @@ pub async fn mp_pair(
     // The same file a later dial to this machine will carry, so the endpoint
     // recorded beside the key as it is minted is the one that then chats.
     let identity = identity_file::resolve(options.identity_dir.as_deref(), pairing.ticket());
-    let paired = modelpipe::pair(
+    let reach_within = Duration::from_millis(reach_within_ms);
+    let paired = match modelpipe::pair(
         &pairing,
         label.as_deref(),
         options.apply(identity.as_deref()),
-        Duration::from_millis(reach_within_ms),
+        reach_within,
     )
-    .await?;
+    .await
+    {
+        Ok(paired) => paired,
+        // `mp_connect`'s arm, one variant out. `PairError::Connect` is raised
+        // before the code is presented -- modelpipe dials, waits to reach the
+        // far machine and only then exchanges -- so a second attempt cannot
+        // spend a one-time code that a first attempt already spent. The
+        // variant that could, `Exchange`, is deliberately not matched here.
+        Err(error) => {
+            let discarded = matches!(error, PairError::Connect(ConnectError::Identity { .. }))
+                && identity.as_deref().is_some_and(identity_file::discard);
+            if !discarded {
+                return Err(error.into());
+            }
+            modelpipe::pair(
+                &pairing,
+                label.as_deref(),
+                options.apply(identity.as_deref()),
+                reach_within,
+            )
+            .await?
+        }
+    };
     Ok(MpPaired {
         pipe: Arc::new(MpPipe::new(paired.handle)),
         api_key: paired.api_key,

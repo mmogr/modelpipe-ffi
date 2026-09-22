@@ -635,6 +635,9 @@ public protocol MpPipeProtocol: AnyObject, Sendable {
      * Stable across launches when `identityDir` is set **and the same ticket
      * is dialled**: the key is one file per far machine, named from the
      * ticket, so a machine that mints a new ticket is met as a new device.
+     * A key this side cannot use is thrown away and replaced rather than
+     * refused, so this can also differ from last launch with nothing else
+     * changed.
      */
     func peerId()  -> String
     
@@ -841,6 +844,9 @@ open func notifyNetworkChange()async   {
      * Stable across launches when `identityDir` is set **and the same ticket
      * is dialled**: the key is one file per far machine, named from the
      * ticket, so a machine that mints a new ticket is met as a new device.
+     * A key this side cannot use is thrown away and replaced rather than
+     * refused, so this can also differ from last launch with nothing else
+     * changed.
      */
 open func peerId() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
@@ -1781,8 +1787,13 @@ enum MpError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
      * cannot read or write — including the case where the directory itself
      * is missing, since nothing here creates one.
      *
-     * Permanent. The file's *name* is this crate's, but the directory it
-     * sits in is the caller's, and that is what is left to fix.
+     * Permanent, and by the time it arrives it has already been fought.
+     * A key file this side could simply replace has been thrown away and the
+     * dial tried once more before this is returned, so what reaches a caller
+     * is a refusal a second attempt cannot fix: the file could not be
+     * removed, or it was removed and could not be written again. The file's
+     * *name* is this crate's; the directory it sits in is the caller's, and
+     * that is what is left to fix.
      */
     case Identity(
         /**
@@ -2678,7 +2689,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_modelpipe_ffi_checksum_method_mppipe_notify_network_change() != 51570) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_modelpipe_ffi_checksum_method_mppipe_peer_id() != 38103) {
+    if (uniffi_modelpipe_ffi_checksum_method_mppipe_peer_id() != 43689) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_modelpipe_ffi_checksum_method_mppipe_port() != 13940) {

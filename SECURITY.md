@@ -23,7 +23,12 @@ the far machine records for this device.
 
 The directory is the app's: this library names the file inside it and never
 creates the directory, so the mode it is made with and whether a backup
-carries it are decisions only the app can make. **The name is a truncated
+carries it are decisions only the app can make. It does **delete** a file it
+named, which is the one destructive thing here: a key modelpipe refuses is
+removed and a fresh one minted in its place, once, and only when the refusal
+was about the key. The cost is this device's fingerprint on the far machine,
+which records fingerprints rather than pinning them; the alternative is a
+device that cannot dial that machine again at all. **The name is a truncated
 SHA-256 of the ticket the key is for**, which means anyone who can both list
 that directory and already hold a candidate ticket can confirm in one hash
 that this device has connected to that machine. Recovering the ticket from a

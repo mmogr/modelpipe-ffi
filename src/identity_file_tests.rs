@@ -183,3 +183,49 @@ fn resolving_creates_nothing() {
     assert!(!absent.exists(), "resolving made the directory");
     assert!(!resolved.exists(), "resolving made the file");
 }
+
+/// Throwing a key away says whether there was one, which is the answer a
+/// caller needs to decide whether dialling again could go any differently.
+#[test]
+fn discard_removes_the_key_and_says_whether_there_was_one() {
+    let scratch = Scratch::new("discard-says-so");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    fs::write(&path, b"anything at all").expect("the scratch directory is writable");
+
+    assert!(discard(&path), "a file that was there reported as absent");
+    assert!(!path.exists());
+    assert!(!discard(&path), "there was nothing left to throw away");
+}
+
+/// What a key looks like is modelpipe's to judge. This side is told only that
+/// the file could not be used, so it removes whatever is at the path without
+/// forming a second opinion about the format — and without reading a key it
+/// has no reason to hold.
+#[test]
+fn discard_does_not_judge_what_is_in_the_file() {
+    let scratch = Scratch::new("discard-does-not-judge");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    fs::write(
+        &path,
+        b"aznmoyaqvvqgfrtdjxnwcejbjrp72o4mrywtnjxqqxwpxyrymxaa\n",
+    )
+    .expect("the scratch directory is writable");
+
+    assert!(discard(&path));
+    assert!(!path.exists());
+}
+
+/// A path that is not a file is not thrown away, so the caller is told there
+/// was nothing to throw and does not dial again.
+#[test]
+fn a_path_that_is_a_directory_is_not_discarded() {
+    let scratch = Scratch::new("discard-a-directory");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    fs::create_dir(&path).expect("the scratch directory is writable");
+
+    assert!(
+        !discard(&path),
+        "a directory was reported as a key thrown away"
+    );
+    assert!(path.is_dir(), "the directory was removed");
+}

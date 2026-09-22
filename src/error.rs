@@ -57,8 +57,13 @@ pub enum MpError {
     /// cannot read or write — including the case where the directory itself
     /// is missing, since nothing here creates one.
     ///
-    /// Permanent. The file's *name* is this crate's, but the directory it
-    /// sits in is the caller's, and that is what is left to fix.
+    /// Permanent, and by the time it arrives it has already been fought.
+    /// A key file this side could simply replace has been thrown away and the
+    /// dial tried once more before this is returned, so what reaches a caller
+    /// is a refusal a second attempt cannot fix: the file could not be
+    /// removed, or it was removed and could not be written again. The file's
+    /// *name* is this crate's; the directory it sits in is the caller's, and
+    /// that is what is left to fix.
     Identity {
         /// The offending file. A path is not a credential, so it is shown.
         path: String,
@@ -145,9 +150,9 @@ impl fmt::Display for MpError {
             }
             Self::Identity { path } => write!(
                 f,
-                "The identity file at {path} cannot be used: it is not a key, someone else can \
-                 read it, or it cannot be read or written. Remove it, or keep keys in a \
-                 directory this app can write to."
+                "The identity file at {path} cannot be used, and could not be replaced. Check \
+                 the directory it is in: it may be missing, or this app may not be allowed to \
+                 write there."
             ),
             Self::PeerUnreachable => write!(
                 f,

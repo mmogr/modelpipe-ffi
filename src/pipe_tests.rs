@@ -448,3 +448,121 @@ async fn a_directory_that_is_not_there_is_not_created() {
     );
     assert!(!absent.exists(), "the directory was created after all");
 }
+
+/// A key this side cannot use is thrown away and the dial tried once more.
+///
+/// modelpipe refuses a key file that is not a key, or that somebody else can
+/// read, and says so permanently. The remedies it names are deleting the file
+/// and starting again, or `chmod 600` for the second — and on a phone there
+/// is nobody to do either. The cost of throwing it away is this device's
+/// fingerprint on the far machine, which records fingerprints and does not
+/// pin them; the alternative is a device that can never dial that machine
+/// again.
+#[tokio::test]
+async fn a_key_this_side_cannot_use_is_replaced_and_the_dial_succeeds() {
+    let scratch = Scratch::new("unusable-key-replaced");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    std::fs::write(&path, b"not a key at all\n").expect("writable");
+
+    let pipe = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("the unusable key was thrown away and the dial tried again");
+    pipe.shutdown().await;
+
+    let now = std::fs::read(&path).expect("a key was minted in its place");
+    assert_ne!(
+        now, b"not a key at all\n",
+        "the unusable key is still there"
+    );
+    assert_eq!(scratch.entries(), vec![GOOD_TICKET_KEY.to_owned()]);
+}
+
+/// A key half written is the shape a crash used to leave behind.
+///
+/// modelpipe before 0.7.0-rc.1 wrote the key into the file in two steps, so a
+/// process killed between them left nothing in it — and an empty file is not
+/// a key, so every later dial to that machine was refused for ever. 0.6 is
+/// what the devices upgrading to this release are running, so this is the
+/// file that is actually out there. 0.7 writes atomically and cannot produce
+/// one any more; it still refuses one, deliberately, rather than minting over
+/// a path it does not own. Throwing it away is this side's job because this
+/// side owns the name.
+#[tokio::test]
+async fn an_empty_key_file_is_replaced() {
+    let scratch = Scratch::new("empty-key-replaced");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    std::fs::write(&path, b"").expect("writable");
+
+    let pipe = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("the empty key was thrown away and the dial tried again");
+    pipe.shutdown().await;
+
+    assert!(
+        !std::fs::read(&path)
+            .expect("a key was minted in its place")
+            .is_empty(),
+        "the key file is still empty"
+    );
+}
+
+/// Once, and only when something was thrown away.
+///
+/// A directory standing where the key belongs cannot be removed, so there is
+/// nothing to throw away and the refusal goes to the caller rather than
+/// starting a second dial. It is the portable way to reach that arm:
+/// `remove_file` on a directory fails on both hosts this is built for, where
+/// a read-only directory would simply not stop a superuser.
+#[tokio::test]
+async fn a_key_file_that_is_a_directory_is_not_discarded() {
+    let scratch = Scratch::new("key-is-a-directory");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    std::fs::create_dir(&path).expect("writable");
+
+    let error = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect_err("a directory is not a key and cannot be thrown away");
+
+    assert!(matches!(error, MpError::Identity { .. }), "{error:?}");
+    assert!(!error.is_retryable());
+    assert!(path.is_dir(), "the directory was removed after all");
+}
+
+/// A failure that is not about the key leaves the key alone.
+///
+/// The discard is the one destructive thing this crate does, so what triggers
+/// it is worth a test of its own: only modelpipe saying it could not use the
+/// key file. A dial refused for any other reason — here an unusable relay —
+/// must not cost this device its fingerprint on a machine it has already
+/// introduced itself to.
+#[tokio::test]
+async fn a_failure_that_is_not_about_the_key_leaves_it_alone() {
+    let scratch = Scratch::new("other-failure-keeps-the-key");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+
+    let pipe = mp_connect(GOOD_TICKET.to_owned(), keeping_a_key_in(&scratch))
+        .await
+        .expect("binds");
+    pipe.shutdown().await;
+    let minted = std::fs::read(&path).expect("a key was minted");
+
+    let error = mp_connect(
+        GOOD_TICKET.to_owned(),
+        MpConnectOptions {
+            relay_url: Some("not a relay url".to_owned()),
+            ..keeping_a_key_in(&scratch)
+        },
+    )
+    .await
+    .expect_err("an unusable relay is not a dial");
+
+    assert!(
+        !matches!(error, MpError::Identity { .. }),
+        "this test needs a failure that is not about the key, got {error:?}"
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("the key is still there"),
+        minted,
+        "a failure that had nothing to do with the key threw it away"
+    );
+}

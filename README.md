@@ -92,6 +92,25 @@ the directory is made, and neither survives being applied afterwards. A
 directory that is missing or cannot be written is `MpError.Identity`, which
 names the file and is not retryable.
 
+**A key this side cannot use is thrown away and the dial tried once more.**
+modelpipe refuses a key file that is not a key, or that somebody else can
+read, and refuses it permanently. The remedies it names are deleting the file
+and starting again, or `chmod 600` for the second — and on a phone there is
+nobody to do either. The cost of throwing it away is this device's fingerprint
+on the far machine, which records fingerprints and does not pin them; the
+alternative is a device that can never dial that machine again. A file half
+written by a process that was killed is enough to earn it, and that is the
+shape modelpipe before 0.7.0-rc.1 could leave behind.
+
+Once, and only when there was a file to throw away, and only when the
+refusal was about the key: a dial that fails for any other reason leaves the
+key untouched. A pairing does the same, which it could not do before —
+`MpPairError` folds every transport failure into one sentence, so the retry is
+written underneath that, against modelpipe's own error, and no new case
+crosses into Swift. It is safe there because `modelpipe::pair` dials, waits to
+reach the far machine, and only then presents the code, so a dial that failed
+on the key has spent nothing.
+
 ### No credential is accepted across this boundary
 
 `mpConnect` takes **no token**, because `modelpipe::connect` takes none either.

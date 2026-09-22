@@ -378,3 +378,45 @@ async fn a_directory_that_is_not_there_makes_pairing_fail_as_a_dial() {
     );
     assert!(!absent.exists(), "the directory was created after all");
 }
+
+/// A pairing heals its key too, which a pairing could not do before.
+///
+/// `MpPairError` folds every transport failure into one case carrying a
+/// sentence, so nothing above this boundary can tell an unusable key from a
+/// machine that is switched off without reading modelpipe's words back. The
+/// retry is written underneath that, against modelpipe's own
+/// `PairError::Connect(ConnectError::Identity)`, so the distinction is used
+/// where it still exists and no new case crosses into Swift.
+///
+/// Reaching `Unreached` is the assertion: it means the dial got past the key
+/// file and went looking for the far machine, which is as far as anything can
+/// go with nothing listening. Before the retry this was `Dial`, and the
+/// pairing stopped at the key.
+#[tokio::test]
+async fn a_key_pairing_cannot_use_is_replaced_and_pairing_goes_on() {
+    let scratch = Scratch::new("pairing-heals-its-key");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    std::fs::write(&path, b"not a key at all\n").expect("writable");
+
+    let error = mp_pair(
+        format!("{GOOD_TICKET}-123456"),
+        None,
+        MpConnectOptions {
+            identity_dir: Some(scratch.as_str().to_owned()),
+            ..offline_options()
+        },
+        150,
+    )
+    .await
+    .expect_err("nothing is listening at the vector ticket");
+
+    assert!(
+        matches!(error, MpPairError::Unreached { .. }),
+        "the pairing stopped at the key rather than at the far machine: {error:?}"
+    );
+    let now = std::fs::read(&path).expect("a key was minted in its place");
+    assert_ne!(
+        now, b"not a key at all\n",
+        "the unusable key is still there"
+    );
+}

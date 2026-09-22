@@ -77,6 +77,21 @@ pub(crate) fn resolve(dir: Option<&str>, ticket: &Ticket) -> Option<PathBuf> {
     Some(Path::new(dir).join(file_name(ticket)))
 }
 
+/// Throw the key at `path` away, and say whether there was one to throw.
+///
+/// `false` is the answer that stops a caller dialling again: it means the
+/// refusal was about the directory or the path rather than about the file's
+/// contents, and a second attempt fails the same way for as long as anyone
+/// lets it. Removing a path that is a directory fails too, which is the
+/// answer wanted there.
+///
+/// Nothing is read first. What a key looks like is modelpipe's to judge, and
+/// a second opinion about its format here is the duplication this seam exists
+/// to refuse — this side only ever hears that the file could not be used.
+pub(crate) fn discard(path: &Path) -> bool {
+    std::fs::remove_file(path).is_ok()
+}
+
 #[cfg(test)]
 #[path = "identity_file_tests.rs"]
 pub(crate) mod identity_file_tests;
