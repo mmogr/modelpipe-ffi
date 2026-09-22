@@ -55,14 +55,21 @@ path = "src/bin/uniffi-bindgen.rs"
 # makes the sides level is which modelpipe it pins, and a version number here
 # is exactly what rotted in the sentence this replaces.)
 #
-# Spelled in full because a candidate has to be: `"0.7"` is a resolution
-# error rather than a loose match, since cargo will not take a pre-release
-# behind a plain caret. What this caret does accept is 0.7.0 itself and every
-# 0.7.x after it, so the line is edited once for the whole minor series. The
-# lock is what the XCFramework is built from, though, so moving to 0.7.0
-# final is a deliberate `cargo update -p modelpipe` and never a side effect —
-# and it has to happen before a release, because a candidate must not be
-# statically linked into something that ships to a phone.
+# Spelled in full because a candidate had to be. While 0.7.0-rc.1 was the only
+# 0.7 published, `"0.7"` was a resolution error rather than a loose match:
+# cargo will not take a pre-release behind a plain caret. Now that 0.7.0 is
+# out, `"0.7"` would resolve — the line is simply not worth a second edit,
+# because this caret already accepts 0.7.0, any later candidate of it, and
+# every 0.7.x release after it. (Not another patch's candidates: a
+# pre-release only satisfies a comparator whose major, minor and patch match
+# its own, so 0.7.1-rc.1 is out.)
+#
+# The lock is what the XCFramework is built from, so moving to 0.7.0 final was
+# a deliberate `cargo update -p modelpipe` and never a side effect, and it had
+# to happen before a release: a candidate must not be statically linked into
+# something that ships to a phone. Done — the lock has resolved 0.7.0 since
+# the commit whose subject says so. What is below is the floor of the range,
+# not what is resolved.
 modelpipe = "0.7.0-rc.1"
 uniffi = { version = "0.32", features = ["tokio", "cli"] }
 # Multi-thread, because modelpipe's futures are all Send (its own
