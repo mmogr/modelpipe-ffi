@@ -1,22 +1,24 @@
-//! The one tokio runtime this library owns.
+//! The one tokio runtime this library owns, and the adapter every async
+//! export runs its body in.
 //!
-//! `UniFFI`'s `async_runtime = "tokio"` polls exported futures inside a tokio
-//! context, but a *context* is not a *runtime*: something has to own the
-//! worker threads, and on the Swift side nothing does. An app links a static
-//! library and calls a function; there is no `#[tokio::main]` anywhere above
-//! it.
-//!
-//! So the library owns one, lazily, for the life of the process. That is the
+//! An app links a static library and calls a function; there is no
+//! `#[tokio::main]` anywhere above it, and `UniFFI` polls an exported future
+//! inline, on whichever Swift thread awaits it, with no tokio context. So the
+//! library owns one runtime, lazily, for the life of the process. That is the
 //! right lifetime for it — a pipe outlives any single call, and modelpipe
 //! spawns the dial, the path watcher and the forwarding loop onto whatever
-//! runtime was current when `connect` was called. A per-call runtime would be
+//! runtime is current while `connect` is polled. A per-call runtime would be
 //! dropped the moment `connect` returned, taking those tasks with it.
 //!
-//! It is also what makes teardown correct. `ConnectHandle`'s own `Drop` is
-//! synchronous and needs nothing, but anything that reaches for
-//! `Handle::try_current()` finds this one rather than nothing.
+//! [`in_runtime`] is what makes it current. It enters this runtime for every
+//! poll of a call's body and for the body's drop, so the body runs on the
+//! calling thread while what it spawns, and the timers and sockets it
+//! registers, run on this runtime's two workers.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::OnceLock;
+use std::task::{Context, Poll};
 
 use tokio::runtime::{Builder, Runtime};
 
@@ -51,26 +53,58 @@ pub(crate) fn runtime() -> &'static Runtime {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The runtime is one runtime, not one per call: a pipe's spawned tasks
-    /// outlive the call that created them, and a fresh runtime per call would
-    /// drop them at the end of it.
-    #[test]
-    fn the_runtime_is_the_same_one_every_time() {
-        let first = std::ptr::from_ref(runtime());
-        let second = std::ptr::from_ref(runtime());
-        assert!(
-            std::ptr::eq(first, second),
-            "runtime() handed out two different runtimes"
-        );
-    }
-
-    /// It can actually run something, which the `OnceLock` alone does not say.
-    #[test]
-    fn the_runtime_runs_a_future() {
-        assert_eq!(runtime().block_on(async { 2 + 2 }), 4);
+/// Run `body` with this library's runtime entered, whichever thread polls it.
+///
+/// Every exported `async fn` is `in_runtime(async move { … }).await`. The body
+/// is polled inline, on the caller's thread, and never handed to a worker, so
+/// a call behaves as it would without the adapter: dropped unfinished, it
+/// stops; a panic in it unwinds into its caller; a watch's cancel ends the
+/// wait on its next poll.
+///
+/// `Send` because `UniFFI` requires the future an export becomes to be
+/// `Send`; asking here names the body that is not, rather than a line of
+/// generated scaffolding. `'static` so the body owns everything it uses — a
+/// method clones the handle it needs rather than borrowing its receiver — and
+/// all of it is dropped with the runtime entered.
+pub(crate) fn in_runtime<F: Future + Send + 'static>(body: F) -> InRuntime<F> {
+    InRuntime {
+        body: Some(Box::pin(body)),
     }
 }
+
+/// The future [`in_runtime`] returns.
+pub(crate) struct InRuntime<F> {
+    /// Boxed so the adapter is `Unpin` and needs no pin projection, which
+    /// would take `unsafe` or a dependency. `None` only once `drop` has
+    /// taken it.
+    body: Option<Pin<Box<F>>>,
+}
+
+impl<F: Future> Future for InRuntime<F> {
+    type Output = F::Output;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
+        let _entered = runtime().enter();
+        self.body
+            .as_mut()
+            .expect("the body is taken only by drop")
+            .as_mut()
+            .poll(cx)
+    }
+}
+
+impl<F> Drop for InRuntime<F> {
+    /// A call can be dropped before it finishes, and on any thread: a Rust
+    /// caller that stops awaiting, or a binding that frees an unfinished
+    /// future, which the FFI allows. What the body still holds is dropped
+    /// here with the runtime entered, so a destructor that hands its cleanup
+    /// to `tokio::spawn` finds a runtime to hand it to.
+    fn drop(&mut self) {
+        let _entered = runtime().enter();
+        drop(self.body.take());
+    }
+}
+
+#[cfg(test)]
+#[path = "runtime_tests.rs"]
+pub(crate) mod runtime_tests;

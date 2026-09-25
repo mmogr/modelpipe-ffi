@@ -88,18 +88,31 @@
 //! Recorded here because it is a decision with alternatives, not an
 //! implementation detail. A phone has no tokio runtime: an app links a static
 //! library and calls a function, and there is no `#[tokio::main]` anywhere
-//! above it. Something has to own the worker threads.
+//! above it. Something has to own the worker threads, and something has to
+//! make them current, because `UniFFI` polls an exported future on the Swift
+//! thread that awaits it.
 //!
 //! **This library owns one, process-wide, built on first use** — see
-//! `src/runtime.rs`. Two workers, multi-threaded, never torn down.
+//! `src/runtime.rs`. Two workers, multi-threaded, never torn down. Every async
+//! export wraps its body in that module's `in_runtime`: the body runs on the
+//! calling thread with this runtime entered, and its tasks run on the two
+//! workers.
 //!
-//! Three things follow, each of which was the reason for a rejected
+//! Four things follow, each of which was the reason for a rejected
 //! alternative:
 //!
 //! - **Not per-call.** modelpipe spawns the dial, the path watcher and the
-//!   forwarding loop onto whatever runtime was current when `connect` was
-//!   called. A runtime dropped when `connect` returns takes all three with it,
-//!   and the pipe dies the moment it is handed over.
+//!   forwarding loop onto whatever runtime is current while `connect` is
+//!   polled. A runtime dropped when `connect` returns takes all three with
+//!   it, and the pipe dies the moment it is handed over.
+//! - **Not `UniFFI`'s `async_runtime = "tokio"`.** That wraps each exported
+//!   future in async-compat's `Compat`, which enters the polling thread's
+//!   runtime if it has one and otherwise a single-threaded runtime of
+//!   async-compat's own. A Swift thread never has one, so every task, timer
+//!   and socket a call started would run on that runtime's one thread, and
+//!   these two workers would carry only the courtesy close a dropped pipe
+//!   hands them. `UniFFI`'s `tokio` feature is left off in `Cargo.toml`,
+//!   so that attribute does not compile.
 //! - **Not torn down on `shutdown`.** An app holds several providers; one
 //!   pipe closing must not stop another's forwarding loop. The runtime
 //!   outlives every pipe deliberately, and costs two idle threads to do it.

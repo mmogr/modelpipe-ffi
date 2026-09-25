@@ -71,7 +71,10 @@ path = "src/bin/uniffi-bindgen.rs"
 # the commit whose subject says so. What is below is the floor of the range,
 # not what is resolved.
 modelpipe = "0.7.0-rc.1"
-uniffi = { version = "0.32", features = ["tokio", "cli"] }
+# Not the `tokio` feature: all it adds is async-compat, for UniFFI's
+# `async_runtime = "tokio"`, which the runtime section of `src/lib.rs`
+# rejects. Left off, that attribute does not compile.
+uniffi = { version = "0.32", features = ["cli"] }
 # Multi-thread, because modelpipe's futures are all Send (its own
 # `future_promises` pins that) and the pipe should not stall on one worker.
 tokio = { version = "1", features = ["rt-multi-thread"] }

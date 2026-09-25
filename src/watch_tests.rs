@@ -11,6 +11,7 @@ use std::time::Duration;
 use super::*;
 use crate::options::MpConnectOptions;
 use crate::pipe::mp_connect;
+use crate::runtime::runtime_tests::poll_on_this_thread;
 
 /// modelpipe's normative ticket vector 1: well-formed, and names an endpoint
 /// nothing is listening on.
@@ -87,6 +88,27 @@ async fn a_cancelled_watch_ends_its_wait_rather_than_parking() {
         .expect("the task finished");
     assert_eq!(next, None, "a cancelled watch answers None");
     assert_eq!(watch.next(MpPipeStatus::Idle).await, None);
+}
+
+/// The shape a Swift app uses: one thread with no tokio runtime waits on the
+/// watch, and another cancels it. The wait is polled inline on the waiting
+/// thread, and the cancel from the other thread is what brings it back, with
+/// `None`.
+#[test]
+fn a_wait_on_a_thread_with_no_runtime_ends_when_another_thread_cancels() {
+    let pipe =
+        poll_on_this_thread(mp_connect(GOOD_TICKET.to_owned(), offline_options())).expect("binds");
+    let watch = pipe.watch();
+    let waiting = {
+        let watch = Arc::clone(&watch);
+        std::thread::spawn(move || poll_on_this_thread(watch.next(MpPipeStatus::Idle)))
+    };
+    std::thread::sleep(Duration::from_millis(50));
+    watch.cancel();
+
+    let next = waiting.join().expect("the waiting thread finished");
+    assert_eq!(next, None, "a cancelled watch answers None");
+    assert_eq!(pipe.status(), MpPipeStatus::Idle, "a cancel closes nothing");
 }
 
 /// Until it is cancelled, a watch reports what `status_changed_since` does:

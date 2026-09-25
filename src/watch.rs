@@ -14,6 +14,7 @@ use std::sync::Arc;
 use modelpipe::ConnectHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::runtime::in_runtime;
 use crate::status::MpPipeStatus;
 
 /// A cancellable view of one pipe's status sequence.
@@ -39,19 +40,26 @@ impl MpWatch {
     }
 }
 
-#[uniffi::export(async_runtime = "tokio")]
+#[uniffi::export]
 impl MpWatch {
     /// Wait for a status different from `snapshot`. `None` once the pipe is
     /// closed and `snapshot` already says so, or once [`cancel`](Self::cancel)
     /// has been called, whether before this wait began or during it.
     pub async fn next(&self, snapshot: MpPipeStatus) -> Option<MpPipeStatus> {
-        tokio::select! {
-            // Cancellation is checked first, so a cancelled watch answers
-            // `None` even when a status change is ready at the same moment.
-            biased;
-            () = self.cancel.cancelled() => None,
-            next = self.handle.status_changed_since(snapshot.into()) => next.map(Into::into),
-        }
+        // A clone of the token is the same token: `cancel` on this watch
+        // cancels the clone the wait holds.
+        let cancel = self.cancel.clone();
+        let handle = Arc::clone(&self.handle);
+        in_runtime(async move {
+            tokio::select! {
+                // Cancellation is checked first, so a cancelled watch answers
+                // `None` even when a status change is ready at the same moment.
+                biased;
+                () = cancel.cancelled() => None,
+                next = handle.status_changed_since(snapshot.into()) => next.map(Into::into),
+            }
+        })
+        .await
     }
 
     /// End every wait on this watch, in flight or yet to start.
