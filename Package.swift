@@ -20,8 +20,8 @@ import PackageDescription
 // rewritten. A sed against a manifest is fragile when it has to match a line
 // that is also doing something else; these do nothing else, and the workflow
 // asserts the substitution actually changed the file before it commits.
-let version = "0.4.0"
-let checksum = "1ff668223fef9eed44dd40a7d1d833793d5bc433c6b67bd3bff96bddf3e2d1d7"
+let version = "0.4.1"
+let checksum = "290feda6d4d42a99e4f706f9a483d84a07093e7bf6d50e1f16cde11613e56a21"
 
 // Between releases these two name the PREVIOUS release's artifact while
 // `Sources/Modelpipe/modelpipe_ffi.swift` is ahead of it. That is a true
