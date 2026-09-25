@@ -23,12 +23,12 @@ import PackageDescription
 let version = "0.4.1"
 let checksum = "290feda6d4d42a99e4f706f9a483d84a07093e7bf6d50e1f16cde11613e56a21"
 
-// Between releases these two name the PREVIOUS release's artifact while
-// `Sources/Modelpipe/modelpipe_ffi.swift` is ahead of it. That is a true
-// record — it names a zip that exists — but it means `main` is not consumable.
-// Resolve a tag, where the two are consistent by construction. A consumer who
-// pinned a branch would link mismatched halves and hit the checksum
-// `fatalError` above, on a phone, at the first dial.
+// Between releases these two name the artifact of the last version pinned on
+// `main` while `Sources/Modelpipe/modelpipe_ffi.swift` can already be ahead of
+// it, so `main` is not consumable. The URL below resolves only if that
+// version's release was published; README.md, Releasing, says when a pinned
+// version is left unpublished. Resolve a tag, where the two are consistent by
+// construction.
 
 // Local development: `MODELPIPE_FFI_LOCAL_XCFRAMEWORK=1` swaps the download for
 // whatever `make xcframework` just built. An environment switch rather than a
