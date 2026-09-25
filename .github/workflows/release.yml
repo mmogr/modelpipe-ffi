@@ -14,6 +14,14 @@
 # strips at most one leading `v` and cannot parse it, so it never appears as a
 # package version.
 #
+# The pin commit's parent is the commit the artifact was built from, it reaches
+# main only while main is still that commit, and the release tag is checked to
+# be the pin. The binding in `Sources/Modelpipe/` and the zip the manifest names
+# are then one build. A pin on a main that had moved on would pair this zip with
+# the binding of a later commit, which UniFFI catches only when the two disagree
+# on its contract version or on an API checksum, and then as a fatalError at the
+# first call into the library.
+#
 # Nothing here publishes to crates.io. release-plz.toml says `publish = false`
 # and the crate's manifest allows no registry that exists, and always will: it
 # is an Apple-platform build artifact, and a source tarball on a registry would
@@ -36,6 +44,15 @@ on:
 
 permissions:
   contents: write
+
+# One release at a time, and none cancelled part-way. A run cancelled between
+# the push to main and the release is the one state that needs a hand to
+# recover, and two runs at once would race each other to main. A dispatch
+# pushes nothing and creates no release, so each one has a group of its own
+# and never waits behind, or displaces, a release that is waiting to run.
+concurrency:
+  group: ${{ github.event_name == 'push' && 'release' || format('release-dispatch-{0}', github.run_id) }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -92,6 +109,43 @@ jobs:
             echo "already_released=false" >> "${GITHUB_OUTPUT}"
             echo "v${version} is not released yet"
           fi
+
+      # On main is not enough: main must still BE the tagged commit. The pin
+      # commit goes on top of the commit the artifact is built from, so once
+      # main has moved past it the pin can reach main only by dropping those
+      # commits. Stopping here saves the build; the pin step checks again
+      # after it, because main can move while it runs.
+      #
+      # A released version is left to the step above. Its own pin has moved
+      # main past its build tag, so this check would turn every later run for
+      # that tag red, and the build job already skips it.
+      #
+      # An unreleased version finds main past its build tag in one of two
+      # states, and README.md gives each its own recovery: another merge
+      # landed first, or an earlier run or attempt pushed this build's pin and
+      # stopped before the release. That pin is the first commit on main
+      # after the built one, with the built commit as its parent and the pin
+      # step's subject. The message names the state; this run builds nothing
+      # in either.
+      - name: Refuse a build that main has moved past
+        if: github.event_name == 'push' && steps.existing.outputs.already_released != 'true'
+        run: |
+          version="${GITHUB_REF_NAME#build/v}"
+          built="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          main="$(git rev-parse origin/main)"
+          if [[ "${main}" != "${built}" ]]; then
+            after="$(git rev-list --first-parent "${built}..${main}" | tail -n 1)"
+            if [[ "$(git rev-parse -q --verify "${after}^")" == "${built}" ]] \
+                && [[ "$(git log -1 --format=%s "${after}")" == "chore(release): pin the v${version} XCFramework checksum" ]]; then
+              echo "::error::main (${main}) carries ${after}, the pin pushed earlier for ${GITHUB_REF_NAME} (${built}), and v${version} is not released; this run builds nothing"
+              echo "::error::README.md, Releasing, 'If the pin landed and the release did not', says what to do next"
+            else
+              echo "::error::main is at ${main}, past ${GITHUB_REF_NAME} (${built}), and v${version} is not released; this run builds nothing"
+              echo "::error::README.md, Releasing, 'Merge nothing between the release PR and the end of its run', says what to do next"
+            fi
+            exit 1
+          fi
+          echo "main is the tagged commit"
 
       - name: Install Rust toolchain
         run: rustup show
@@ -155,7 +209,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # `main` is fetched below to commit the checksum onto it.
+          # `main` is fetched below to check it is still the built commit
+          # before the pin is pushed onto it.
           fetch-depth: 0
           # The push uses RELEASE_PAT explicitly rather than whatever the
           # checkout left in .git/config.
@@ -208,15 +263,20 @@ jobs:
       # checksum onto main, create the tag on that commit, then prove a
       # consumer can actually resolve what was just published.
       - name: Pin the checksum on main
+        id: pin
         if: github.event_name == 'push'
         env:
           RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
           CHECKSUM: ${{ steps.package.outputs.checksum }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#build/v}"
-          git fetch origin main
+          # The commit the artifact was built from. `^{commit}` peels an
+          # annotated tag to the commit it names.
+          built="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          # The pin goes on the built commit, never on whatever main is now.
           # `build/` is gitignored, so the artifact and its zip survive this.
-          git checkout -B main origin/main
+          git checkout -q --detach "${built}"
 
           # Two dedicated `let` lines that exist only to be rewritten. A sed
           # against a manifest is fragile when it has to match a line that is
@@ -224,11 +284,9 @@ jobs:
           sed -i '' -E "s|^let version = \".*\"$|let version = \"${version}\"|" Package.swift
           sed -i '' -E "s|^let checksum = \".*\"$|let checksum = \"${CHECKSUM}\"|" Package.swift
 
-          # A silent no-op here would publish a tag whose manifest names the
-          # PREVIOUS release's zip while the binding beside it is this one's —
-          # mismatched halves, which UniFFI turns into a fatalError on a device
-          # at the first dial rather than an error at build time. So the
-          # substitution has to have changed something.
+          # The substitution has to have changed something. Without this check
+          # the path-limited commit below would still stop the step, but with
+          # git's report that there is nothing to commit instead of the reason.
           if git diff --quiet -- Package.swift; then
             echo "::error::the checksum substitution matched nothing in Package.swift"
             echo "::error::expected lines: let version = \"...\" and let checksum = \"...\""
@@ -242,25 +300,85 @@ jobs:
           # the '"'"' idiom here — which belongs inside SINGLE quotes — left an
           # unbalanced quote, and the whole step died on a syntax error after
           # the build, the smoke test and the checksum had all succeeded.
+          subject="chore(release): pin the v${version} XCFramework checksum"
           git -c user.name="Matt O'Grady" \
               -c user.email="sewing.wader8c@icloud.com" \
-              commit -qm "chore(release): pin the v${version} XCFramework checksum" \
+              commit -qm "${subject}" \
               -- Package.swift
-          # The secret is masked in the log. This runs before the release is
-          # created on purpose: if the push is refused, no tag and no release
-          # exist yet and no version has been burned.
-          git push "https://x-access-token:${RELEASE_PAT}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          pin="$(git rev-parse HEAD)"
 
-      # The tag is created HERE, from the commit that carries its own checksum,
-      # which is why `--verify-tag` is absent: `gh` creates it from `--target`,
-      # and that is the mechanism rather than an oversight.
+          # The pin is the built commit plus a new Package.swift and nothing
+          # else, so the release tag carries the binding this zip was built
+          # with.
+          if [[ "$(git rev-parse "${pin}^")" != "${built}" ]]; then
+            echo "::error::the pin's parent is not the built commit ${built}"
+            exit 1
+          fi
+          changed="$(git diff --name-only "${built}" "${pin}")"
+          if [[ "${changed}" != "Package.swift" ]]; then
+            echo "::error::the pin changes more than Package.swift:"
+            echo "${changed}"
+            exit 1
+          fi
+
+          # Main must still be the built commit. The verify job checked that
+          # before the build; this checks it again after it, since the build
+          # takes long enough for another merge to land. This attempt has
+          # pushed nothing and created no release yet, so a stop here adds
+          # nothing to main or to the releases.
+          #
+          # Main is also past the built commit when an earlier run or attempt
+          # pushed this build's pin. This step finds that pin as verify finds
+          # it and asks for the release itself, rather than relying on the
+          # verify job: the message names which state main is in and, when
+          # main carries the pin, whether the release exists.
+          git fetch -q origin "+refs/heads/main:refs/remotes/origin/main"
+          main="$(git rev-parse origin/main)"
+          if [[ "${main}" != "${built}" ]]; then
+            after="$(git rev-list --first-parent "${built}..${main}" | tail -n 1)"
+            if [[ "$(git rev-parse -q --verify "${after}^")" == "${built}" ]] \
+                && [[ "$(git log -1 --format=%s "${after}")" == "${subject}" ]]; then
+              if gh release view "v${version}" >/dev/null 2>&1; then
+                echo "::error::main (${main}) carries ${after}, the pin pushed earlier for ${GITHUB_REF_NAME} (${built}), and v${version} is released; this attempt pushed nothing and created no release"
+                echo "::error::README.md, Releasing, says how to check the release from a machine"
+              else
+                echo "::error::main (${main}) carries ${after}, the pin pushed earlier for ${GITHUB_REF_NAME} (${built}), and v${version} is not released; this attempt pushed nothing and created no release"
+                echo "::error::README.md, Releasing, 'If the pin landed and the release did not', says what to do next"
+              fi
+            else
+              echo "::error::main is at ${main}, not ${GITHUB_REF_NAME} (${built}); this attempt pushed nothing and created no release"
+              echo "::error::README.md, Releasing, 'Merge nothing between the release PR and the end of its run', says what to do next"
+            fi
+            exit 1
+          fi
+
+          # A plain push, never forced: if main moves between the fetch above
+          # and this push, the update is not a fast-forward and git refuses
+          # it. The secret is masked in the log. This runs before the release
+          # is created on purpose: if the push is refused, no tag and no
+          # release exist yet.
+          git push "https://x-access-token:${RELEASE_PAT}@github.com/${GITHUB_REPOSITORY}.git" \
+              "${pin}:refs/heads/main"
+          echo "pin=${pin}" >> "${GITHUB_OUTPUT}"
+
+      # The tag is created HERE, on the pin commit the step above pushed, which
+      # carries its own checksum. That is why `--verify-tag` is absent: `gh`
+      # creates it from `--target`, and that is the mechanism rather than an
+      # oversight. The tag is then read back and must be the pin: the pin
+      # step's checks are about the pin, and nothing before this ties the tag
+      # to it.
       - name: Create the release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           SLICES: ${{ steps.package.outputs.slices }}
+          PIN: ${{ steps.pin.outputs.pin }}
         run: |
           version="${GITHUB_REF_NAME#build/v}"
+          if [[ -z "${PIN}" ]]; then
+            echo "::error::the pin step recorded no commit to tag"
+            exit 1
+          fi
           notes="$(mktemp)"
           {
             echo "## Consuming this release"
@@ -283,21 +401,40 @@ jobs:
 
           gh release create "v${version}" \
             build/ModelpipeFFI.xcframework.zip \
-            --target "$(git rev-parse HEAD)" \
+            --target "${PIN}" \
             --title "v${version}" \
             --notes-file "${notes}" \
             --generate-notes
 
-      # The one step that executes the entire release claim at once: the tag
-      # exists, its manifest names the zip that was just uploaded, the checksum
-      # matches, the binding compiles against it, and all seven linker settings
-      # reach a consumer that declares none. `swift package resolve` is what
-      # performs the download and the checksum verification; a `.dynamic`
-      # product is what forces a final link.
+          git fetch -q origin "+refs/tags/v${version}:refs/tags/v${version}"
+          tagged="$(git rev-parse "v${version}^{commit}")"
+          if [[ "${tagged}" != "${PIN}" ]]; then
+            echo "::error::v${version} was created on ${tagged}, not on the pin ${PIN}"
+            exit 1
+          fi
+          echo "v${version} is the pin ${PIN}"
+
+      # The release as a consumer meets it: the tag resolves to the pin this
+      # run pushed, so its manifest names the zip just uploaded and this run's
+      # checksum; the download matches that checksum; the binding compiles
+      # against it; the linker settings the package declares are enough to link
+      # a consumer that declares none; and the library answers a call.
+      # `swift build` resolves the package first, which is what performs the
+      # download and the checksum verification, and writes the revision it
+      # resolved to Package.resolved; an executable is what forces a final
+      # link. The revision check here and the pin step's checks (the pin's
+      # parent is the built commit, and it changes only Package.swift) are what
+      # make the binding and the library one build. Running the executable
+      # adds UniFFI's own check: the first call into the library compares the
+      # binding's API checksums with the library's and calls fatalError when
+      # they differ, so a pair that links but disagrees on a checksum fails
+      # here, where a gate that only linked would pass it.
       #
       # Everything upstream tests the repository. This tests the release.
-      - name: A consumer can actually resolve it
+      - name: A consumer can resolve it and call into it
         if: github.event_name == 'push'
+        env:
+          PIN: ${{ steps.pin.outputs.pin }}
         # SwiftPM puts no timeout on a binary-artifact download, so a stalled
         # connection here hangs until the job's own limit. On 2026-09-08 that
         # wedged the v0.1.2 run for 70 minutes on a 210 MB fetch that takes
@@ -317,14 +454,11 @@ jobs:
           let package = Package(
               name: "ResolveGate",
               platforms: [.macOS(.v26)],
-              products: [
-                  .library(name: "ResolveGate", type: .dynamic, targets: ["ResolveGate"])
-              ],
               dependencies: [
                   .package(url: "https://github.com/${GITHUB_REPOSITORY}.git", exact: "${version}")
               ],
               targets: [
-                  .target(
+                  .executableTarget(
                       name: "ResolveGate",
                       dependencies: [.product(name: "Modelpipe", package: "modelpipe-ffi")]
                   )
@@ -333,17 +467,33 @@ jobs:
           )
           SWIFT
 
-          cat > "${gate}/Sources/ResolveGate/Gate.swift" <<'SWIFT'
+          cat > "${gate}/Sources/ResolveGate/main.swift" <<'SWIFT'
+          import Foundation
           import Modelpipe
 
-          // Never called. It exists so the linker has to resolve the symbols a
-          // real consumer would reach for.
-          public func gate() async throws -> String {
-              let pipe = try await mpConnect(ticket: "nope", options: MpConnectOptions())
-              return pipe.baseUrl()
+          // The first call into the library runs UniFFI's comparison of the
+          // binding's API checksums with the library's, and a mismatch is a
+          // fatalError, not a throw, so any answer at all means they agree.
+          // The answer expected is a refusal: "nope-12345" is not a pairing
+          // string, and reading one touches no network.
+          do {
+              _ = try mpReadPairing(pairing: "nope-12345")
+              print("error: a string that is not a pairing string was read as one")
+              exit(1)
+          } catch let error as MpPairError {
+              print("the library answered across the boundary: \(error)")
+          } catch {
+              print("error: expected an MpPairError, got \(error)")
+              exit(1)
           }
           SWIFT
 
           cd "${gate}"
           swift build
-          echo "a consumer resolved v${version}, downloaded the artifact, and linked it"
+          resolved="$(jq -r '.pins[] | select(.identity == "modelpipe-ffi") | .state.revision' Package.resolved)"
+          if [[ "${resolved}" != "${PIN}" ]]; then
+            echo "::error::v${version} resolved to '${resolved}', not the pin ${PIN}"
+            exit 1
+          fi
+          swift run ResolveGate
+          echo "a consumer resolved v${version}, downloaded the artifact, linked it, and called into it"

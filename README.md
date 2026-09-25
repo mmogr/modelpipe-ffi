@@ -245,10 +245,11 @@ carries UniFFI's API checksums and calls `fatalError("UniFFI API checksum mismat
 when they disagree with the library — a crash on a device at the first dial,
 not an error at build time.
 
-At a tag the two are consistent by construction. On `main` they are not:
-`Package.swift` names the *previous* release's artifact while the binding is
-already ahead of it. That is a true record — it names a zip that exists — but
-it is not a consumable one.
+At a tag the two are consistent by construction. On `main` they need not be:
+`Package.swift` names the artifact of the last version pinned on `main` while
+the binding can already be ahead of it, so `main` is not consumable. That
+artifact's URL resolves only if its version's release was published;
+[Releasing](#releasing) says when a pinned version is left unpublished.
 
 ### Showing an error: `message()`, never `localizedDescription`
 
@@ -293,16 +294,36 @@ stale is a package nobody can build. There is no chicken and egg — `Package.sw
 is not an input to the artifact, since the build never opens a manifest and the
 zip holds only the XCFramework — just an order: **build, pin, tag.**
 
+The pin commit's parent is the commit the artifact was built from, it reaches
+`main` only while `main` is still that commit, and the release tag is checked
+to be the pin. That is what makes the binding at a release tag and the zip its
+manifest names one build.
+
 `build/vX.Y.Z` never appears as a package version: SwiftPM's `Version(tag:)`
 strips at most one leading `v` and cannot parse the rest.
 
-The last step of a release is a consumer resolving it. `release.yml` synthesises
-a throwaway package depending on the version just published, with a `.dynamic`
-product so the link is forced, and builds it. That one step executes the entire
-claim at once — the tag exists, its manifest names the uploaded zip, the
-checksum matches, the binding compiles against it, and all seven linker settings
-reach a consumer that declares none. Everything before it tests the repository;
-this tests the release.
+The last step of a release is a consumer resolving it and calling into it.
+`release.yml` synthesises a throwaway executable depending on the version just
+published, builds it, checks that the tag resolved to the pin, and runs it.
+That step meets the release as a consumer does: the tag resolves to the pin,
+so its manifest names the zip just uploaded; the download matches the
+checksum; the binding compiles against it; the linker settings the package
+declares are enough to link a consumer that declares none; and the library
+answers a call. The call adds UniFFI's own check: `mpReadPairing` is the first
+call into the library, which is where UniFFI compares the binding's API
+checksums with the library's and calls `fatalError` when they differ, so a
+pair that links but disagrees on a checksum fails here, where a gate that only
+linked would pass it. Everything before it tests the repository; this tests
+the release.
+
+That step has not yet passed on the runner. In every release run from v0.1.2
+to v0.4.1 the runner's download of the zip stalled and the step was stopped
+([#24](https://github.com/mmogr/modelpipe-ffi/issues/24)). Until that is
+fixed, a red last step after a green "Create the release" means the release
+exists and its tag is the pin, and the release has to be checked from a
+machine: resolve the version from a scratch package, as the step does.
+A re-run publishes nothing further: `verify` and the pin step refuse a version
+whose pin or release already exists.
 
 Nothing is published to crates.io. The product here is a binary, so there
 are two guards: `release-plz.toml` says `publish = false`, which stops the
@@ -316,7 +337,7 @@ pushed the build tag: every tag up to `build/v0.1.4` was pushed by hand, and
 ([#21](https://github.com/mmogr/modelpipe-ffi/issues/21)). Never configure a
 registry named `nowhere`; cargo selects the only allowed registry by itself.
 
-Two things worth knowing:
+Worth knowing:
 
 - **A tag whose release already exists stops the workflow.** The build is not
   byte-reproducible, so a second run of a version would compute a different
@@ -325,10 +346,60 @@ Two things worth knowing:
   `build/v0.1.0` safe to create as release-plz's baseline; see
   `release-plz.toml` for why that was needed.
 - **`release.yml` commits to `main`.** One commit per release, pinning the
-  checksum, authored as the repository owner. It needs the ruleset protecting
-  `main` to allow a repository-admin bypass, because `RELEASE_PAT` authenticates
-  as its owner. The push happens *before* the release is created, so if it is
-  ever refused, no tag and no release exist and no version has been burned.
+  checksum, authored as the repository owner, on top of the commit the artifact
+  was built from. The push is plain, never forced, so it lands only as a
+  fast-forward of that commit. It needs the ruleset protecting `main` to allow a
+  repository-admin bypass, because `RELEASE_PAT` authenticates as its owner. The
+  push happens *before* the release is created, so if it is ever refused, no tag
+  and no release exist. One release runs at a time: a second waits for the
+  first rather than cancelling it.
+- **Merge nothing between the release PR and the end of its run.** If `main`
+  moves before the pin is pushed, the release stops: `verify` refuses a build
+  tag `main` has moved past, and the pin step checks again after the build,
+  because a pin on the newer `main` would put this zip beside a binding it was
+  not built from. Nothing is published — no pin, no `vX.Y.Z`, no release — but
+  `build/vX.Y.Z` exists, and release-plz reads versions off those tags, so it
+  counts X.Y.Z as released. **Leave X.Y.Z unpublished and take the version
+  the next release PR proposes** (X.Y.Z+1, or X.(Y+1).0 if a feature or a
+  breaking change landed);
+  0.1.1 and 0.1.4 have build tags and no release too. The one exception is a
+  hotfix that has to ship as X.Y.Z: move the build tag to `main`'s tip and
+  push it again
+  (`git fetch origin && git tag -f build/vX.Y.Z origin/main && git push -f origin build/vX.Y.Z`).
+  That releases everything on `main` under X.Y.Z's changelog, and works only
+  while `Cargo.toml` on `main` still says X.Y.Z.
+- **If the pin landed and the release did not,** `main` carries the pin and
+  `vX.Y.Z` does not exist. Do not re-run the workflow to recover. A re-run
+  publishes nothing further: `verify` and the pin step refuse a version whose
+  pin or release already exists. "Re-run failed jobs" also rebuilds, and
+  reaches "Upload the artifact", under the same artifact name, before it
+  reaches the pin step; the zip the pin names exists only in the attempt that
+  built it. Within 14 days, the artifact's retention, publish that zip by
+  hand. List the run's artifacts of that name by id:
+
+  ```sh
+  gh api repos/mmogr/modelpipe-ffi/actions/runs/<run-id>/artifacts \
+    --jq '.artifacts[] | select(.name == "ModelpipeFFI.xcframework.zip") | "\(.id) \(.created_at) \(.expired)"'
+  ```
+
+  Download each one by its id, and compare its checksum with the one
+  `Package.swift` names at the pin:
+
+  ```sh
+  gh api repos/mmogr/modelpipe-ffi/actions/artifacts/<id>/zip > artifact.zip && unzip -o artifact.zip
+  swift package compute-checksum ModelpipeFFI.xcframework.zip
+  git show <pin>:Package.swift | grep '^let checksum'
+  ```
+
+  Publish only the zip whose checksum is the pin's:
+  `gh release create vX.Y.Z ModelpipeFFI.xcframework.zip --target <pin> --title vX.Y.Z --generate-notes`.
+  Never use `gh run download -n` here: it chooses an artifact by its name,
+  and only the checksum identifies the zip the pin names. If no artifact
+  matches — they expired, or were replaced — leave X.Y.Z unpublished and take
+  the version the next release PR proposes, as when `main` moved first; the
+  re-pushed build tag is for a hotfix only. The resolve gate does not run for
+  a release published by hand, so resolve the version from a scratch package
+  before relying on it.
 - **It needs a `RELEASE_PAT` secret** — a fine-grained PAT scoped to this
   repository, Contents and Pull requests read/write. Not a preference: events
   created with the default `GITHUB_TOKEN` trigger no workflows, so the release
