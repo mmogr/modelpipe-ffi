@@ -8,9 +8,13 @@
 #     the consuming app uses
 #   - the static library links and every symbol resolves
 #   - a synchronous call returns a value
-#   - an ASYNC call returns, which is the one that fails if the library's
-#     tokio runtime was never started: that shows up as a hang, not an error,
-#     and nothing else in CI would catch it
+#   - the ASYNC calls return. Without the library's tokio runtime entered,
+#     the first dial (`mpConnect` in step 2) panics in Rust and Swift stops
+#     on a fatal error. With a runtime whose workers never started, the dial
+#     returns and the first call after it that waits on the runtime hangs,
+#     not errors. The Rust tests poll every async export from a thread with
+#     no runtime too, but only this polls them through the generated
+#     scaffolding, as an app does
 #
 # WHAT THIS DOES NOT PROVE
 #   Nothing about a network. No hole punching, no NAT traversal, no relay, no
@@ -249,9 +253,10 @@ print("ok  a missing directory is refused, not created")
 
 try? FileManager.default.removeItem(at: keyDir)
 
-// 3. The async path. This is the one that hangs rather than errors if the
-//    library's runtime was never started, so it is the reason this script
-//    exists at all.
+// 3. The async methods, awaited through the generated scaffolding like the
+//    dial. A call that waits on the library's runtime is where a runtime
+//    whose workers never started hangs rather than errors, which is the
+//    failure the bound at the bottom of this script exists for.
 await pipe.notifyNetworkChange()
 print("ok  async notifyNetworkChange returned")
 
@@ -403,9 +408,9 @@ export MODELPIPE_FFI_LOCAL_XCFRAMEWORK=1
 # Bounded, and the bound is the point rather than caution.
 #
 # Every check below is either immediate or fails fast; nothing here waits on a
-# network. So the one way this runs long is the failure the script exists to
+# network. So the one way this runs long is a failure the script exists to
 # find — an async call that never returns because the library's tokio runtime
-# was never started. Left unbounded that is indistinguishable from a slow
+# has no running workers. Left unbounded that is indistinguishable from a slow
 # runner until the job hits its own ceiling with no clue why.
 #
 # `timeout` exits 124 on expiry, which is caught here so the log names the

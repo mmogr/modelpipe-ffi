@@ -9,7 +9,10 @@
 
 use super::*;
 
+use std::io::{Read, Write};
+
 use crate::identity_file::identity_file_tests::{GOOD_TICKET_KEY, Scratch};
+use crate::runtime::runtime_tests::poll_on_this_thread;
 
 /// modelpipe's normative ticket vector 1: well-formed, and names an endpoint
 /// nothing is listening on.
@@ -254,6 +257,75 @@ async fn a_pipe_that_reached_nothing_reports_zeroes() {
 
     assert_eq!(pipe.network_metrics(), MpNetworkMetrics::default());
     pipe.shutdown().await;
+}
+
+/// Ask the pipe's loopback port for something over plain blocking I/O, and
+/// return whatever comes back before the pipe closes the connection.
+///
+/// Bounded both ways, so a listener nobody is running fails the test rather
+/// than hanging it.
+fn ask(port: u16) -> String {
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("the port accepts");
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .expect("a read timeout");
+    stream
+        .write_all(b"GET /v1/models HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .expect("the request is written");
+    let mut answer = Vec::new();
+    stream
+        .read_to_end(&mut answer)
+        .expect("an answer and then the end of it, within the timeout");
+    String::from_utf8_lossy(&answer).into_owned()
+}
+
+/// A dial polled from a thread with no tokio runtime, which is the Swift
+/// caller's situation, binds; and once that thread has ended the pipe still
+/// answers. Its listener and the exchange it starts run on the library's
+/// workers, not on whichever thread dialled.
+///
+/// The answer is the pipe's own 502, which is what it owes a client while the
+/// far machine is away.
+#[test]
+fn a_dial_polled_from_a_thread_with_no_runtime_binds_and_outlives_that_thread() {
+    let pipe = std::thread::spawn(|| {
+        poll_on_this_thread(mp_connect(GOOD_TICKET.to_owned(), offline_options()))
+    })
+    .join()
+    .expect("the dialling thread finished without a panic")
+    .expect("binds");
+
+    let answer = ask(pipe.port());
+    assert!(answer.starts_with("HTTP/1.1 502"), "{answer}");
+    assert!(answer.contains("tunnel_unavailable"), "{answer}");
+}
+
+/// Every async method of a pipe, polled the same way: a wait runs out on the
+/// library's timer, the resume hook returns, a shutdown closes the pipe, and
+/// the status sequence reports the close and then ends.
+#[test]
+fn every_async_method_of_a_pipe_runs_from_a_thread_with_no_runtime() {
+    let pipe =
+        poll_on_this_thread(mp_connect(GOOD_TICKET.to_owned(), offline_options())).expect("binds");
+
+    let unreached =
+        poll_on_this_thread(pipe.wait_reachable(150)).expect_err("nothing answers the dial");
+    assert!(
+        matches!(unreached, MpUnreached::TimedOut { within_ms: 150 }),
+        "{unreached:?}"
+    );
+    poll_on_this_thread(pipe.notify_network_change());
+
+    poll_on_this_thread(pipe.shutdown());
+    assert_eq!(pipe.status(), MpPipeStatus::Closed);
+    assert_eq!(
+        poll_on_this_thread(pipe.status_changed_since(MpPipeStatus::Idle)),
+        Some(MpPipeStatus::Closed)
+    );
+    assert_eq!(
+        poll_on_this_thread(pipe.status_changed_since(MpPipeStatus::Closed)),
+        None
+    );
 }
 
 /// Dropping the last reference outside the runtime returns at once: the

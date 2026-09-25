@@ -10,7 +10,7 @@ use crate::error::MpError;
 use crate::identity_file;
 use crate::options::MpConnectOptions;
 use crate::pair_error::MpUnreached;
-use crate::runtime::runtime;
+use crate::runtime::{in_runtime, runtime};
 use crate::status::{MpCloseReason, MpNetworkMetrics, MpPipeStatus};
 use crate::watch::MpWatch;
 
@@ -32,8 +32,9 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 /// out.
 #[derive(uniffi::Object)]
 pub struct MpPipe {
-    /// Shared with the courtesy close `Drop` hands to the runtime, and with
-    /// every watch: the handle outlives the Swift object that dropped it.
+    /// Shared with the courtesy close `Drop` hands to the runtime, with every
+    /// watch, and with each call in flight, whose body owns what it uses: the
+    /// handle outlives the Swift object that dropped it.
     handle: Arc<ConnectHandle>,
 }
 
@@ -54,36 +55,42 @@ pub struct MpPipe {
 /// [`MpError::BadTicket`] or [`MpError::UnsupportedTicketVersion`] if the
 /// pairing string is not one, before anything touches the network; then
 /// whatever the dial itself refuses with.
-#[uniffi::export(async_runtime = "tokio")]
+#[uniffi::export]
 pub async fn mp_connect(ticket: String, options: MpConnectOptions) -> Result<Arc<MpPipe>, MpError> {
-    // Parsed first, and on the caller's thread: a malformed ticket should cost
-    // nothing and should not be indistinguishable from a machine that is away.
-    let ticket = Ticket::from_str(&ticket)?;
-    // Named from the parsed ticket, never from the string that arrived: the
-    // two differ for tickets that are perfectly valid, and the file's name is
-    // a contract with the app rather than this crate's business alone.
-    let identity = identity_file::resolve(options.identity_dir.as_deref(), &ticket);
-    match modelpipe::connect(&ticket, options.apply(identity.as_deref())).await {
-        Ok(handle) => Ok(Arc::new(MpPipe::new(handle))),
-        // Matched against modelpipe's own error, before the `From` below
-        // flattens it. Exactly once, and only when a file was actually
-        // removed: with nothing thrown away the refusal is about the
-        // directory rather than the key, and dialling again fails the same
-        // way. Straight-line rather than a loop, because "once" is the whole
-        // of the rule. The same six lines are in `mp_pair`, against the
-        // variant that wraps this one; a combinator over two error types and
-        // two results would hide the predicate, which is the only part worth
-        // reading.
-        Err(error) => {
-            let discarded = matches!(error, ConnectError::Identity { .. })
-                && identity.as_deref().is_some_and(identity_file::discard);
-            if !discarded {
-                return Err(error.into());
+    in_runtime(async move {
+        // Parsed first, and on the caller's thread: a malformed ticket should
+        // cost nothing and should not be indistinguishable from a machine
+        // that is away.
+        let ticket = Ticket::from_str(&ticket)?;
+        // Named from the parsed ticket, never from the string that arrived:
+        // the two differ for tickets that are perfectly valid, and the file's
+        // name is a contract with the app rather than this crate's business
+        // alone.
+        let identity = identity_file::resolve(options.identity_dir.as_deref(), &ticket);
+        match modelpipe::connect(&ticket, options.apply(identity.as_deref())).await {
+            Ok(handle) => Ok(Arc::new(MpPipe::new(handle))),
+            // Matched against modelpipe's own error, before the `From` below
+            // flattens it. Exactly once, and only when a file was actually
+            // removed: with nothing thrown away the refusal is about the
+            // directory rather than the key, and dialling again fails the
+            // same way. Straight-line rather than a loop, because "once" is
+            // the whole of the rule. The same six lines are in `mp_pair`,
+            // against the variant that wraps this one; a combinator over two
+            // error types and two results would hide the predicate, which is
+            // the only part worth reading.
+            Err(error) => {
+                let discarded = matches!(error, ConnectError::Identity { .. })
+                    && identity.as_deref().is_some_and(identity_file::discard);
+                if !discarded {
+                    return Err(error.into());
+                }
+                let handle =
+                    modelpipe::connect(&ticket, options.apply(identity.as_deref())).await?;
+                Ok(Arc::new(MpPipe::new(handle)))
             }
-            let handle = modelpipe::connect(&ticket, options.apply(identity.as_deref())).await?;
-            Ok(Arc::new(MpPipe::new(handle)))
         }
-    }
+    })
+    .await
 }
 
 impl MpPipe {
@@ -95,7 +102,7 @@ impl MpPipe {
     }
 }
 
-#[uniffi::export(async_runtime = "tokio")]
+#[uniffi::export]
 impl MpPipe {
     /// A cancellable view of this pipe's status sequence: the wait a Swift
     /// `Task` cannot cancel across the boundary, as an object it can.
@@ -111,11 +118,15 @@ impl MpPipe {
     /// [`MpUnreached`] when the wait runs out or the pipe closes first. On a
     /// timeout the pipe keeps looking; nothing is torn down.
     pub async fn wait_reachable(&self, within_ms: u64) -> Result<MpPipeStatus, MpUnreached> {
-        self.handle
-            .wait_reachable(Duration::from_millis(within_ms))
-            .await
-            .map(Into::into)
-            .map_err(Into::into)
+        let handle = Arc::clone(&self.handle);
+        in_runtime(async move {
+            handle
+                .wait_reachable(Duration::from_millis(within_ms))
+                .await
+                .map(Into::into)
+                .map_err(Into::into)
+        })
+        .await
     }
 
     /// Who this device connects as: its endpoint id, sixty-four hex
@@ -172,10 +183,14 @@ impl MpPipe {
     /// continuation.finish()                          // only after a close
     /// ```
     pub async fn status_changed_since(&self, snapshot: MpPipeStatus) -> Option<MpPipeStatus> {
-        self.handle
-            .status_changed_since(snapshot.into())
-            .await
-            .map(Into::into)
+        let handle = Arc::clone(&self.handle);
+        in_runtime(async move {
+            handle
+                .status_changed_since(snapshot.into())
+                .await
+                .map(Into::into)
+        })
+        .await
     }
 
     /// Why the pipe closed, or `None` while it is open.
@@ -195,7 +210,8 @@ impl MpPipe {
     /// has a pipe with nothing to repair it until that poll comes round —
     /// unless the app says so, here, from the resume it already handles.
     pub async fn notify_network_change(&self) {
-        self.handle.notify_network_change().await;
+        let handle = Arc::clone(&self.handle);
+        in_runtime(async move { handle.notify_network_change().await }).await;
     }
 
     /// Transport counters for this pipe's endpoint.
@@ -210,7 +226,8 @@ impl MpPipe {
     /// once. Afterwards the base URL refuses connections rather than hanging,
     /// and the status sequence has ended.
     pub async fn shutdown(&self) {
-        self.handle.shutdown_timeout(SHUTDOWN_GRACE).await;
+        let handle = Arc::clone(&self.handle);
+        in_runtime(async move { handle.shutdown_timeout(SHUTDOWN_GRACE).await }).await;
     }
 }
 

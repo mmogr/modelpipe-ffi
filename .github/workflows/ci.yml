@@ -129,12 +129,12 @@ jobs:
   apple:
     name: Apple build and Swift smoke
     runs-on: macos-26
-    # The smoke test's whole subject is a call that HANGS rather than errors —
-    # an async method whose runtime was never started. Without a ceiling here,
-    # detecting that would mean a job running to GitHub's six-hour default on a
-    # runner billed at ten times the Linux rate. A cold three-slice build plus
-    # the Swift package is comfortably under twenty; thirty leaves room for a
-    # slow runner without leaving room for a hang.
+    # One failure the smoke test exists to find HANGS rather than errors: an
+    # async method on a runtime whose workers never started. Without a
+    # ceiling here, detecting that would mean a job running to GitHub's
+    # six-hour default on a runner billed at ten times the Linux rate. A cold
+    # three-slice build plus the Swift package is comfortably under twenty;
+    # thirty leaves room for a slow runner without leaving room for a hang.
     timeout-minutes: 30
     steps:
       - name: Checkout repository
@@ -174,8 +174,10 @@ jobs:
       # WHAT THIS PROVES: the generated Swift compiles under the same
       # strict-concurrency settings the app uses, the static library links,
       # every symbol resolves, and a call across the boundary returns —
-      # including an async one, which is where a runtime that was never
-      # started shows up as a hang rather than an error.
+      # including the async ones. Without the library's runtime entered, the
+      # first dial stops on a fatal error. With a runtime whose workers never
+      # started, the first call after the dial that waits on the runtime
+      # hangs.
       #
       # WHAT IT DOES NOT PROVE: anything about a network. No hole punching, no
       # NAT traversal, no relay, no phone. A runner is not a device behind

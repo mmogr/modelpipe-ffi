@@ -8,6 +8,7 @@ use modelpipe::PairError;
 use crate::identity_file::identity_file_tests::{GOOD_TICKET_KEY, Scratch};
 use crate::pair_error::MpUnreached;
 use crate::pipe::mp_connect;
+use crate::runtime::runtime_tests::poll_on_this_thread;
 use crate::status::MpPipeStatus;
 
 /// modelpipe's normative ticket vector 1: well-formed, and names an endpoint
@@ -68,6 +69,25 @@ async fn pairing_with_a_machine_that_is_not_there_times_out_and_says_so() {
     assert!(
         message.ends_with('.') || message.ends_with(')'),
         "{message}"
+    );
+}
+
+/// The same pairing, polled from a thread with no tokio runtime, which is the
+/// Swift caller's situation: the dial and the wait run on the library's own
+/// runtime, and the answer is the same timeout.
+#[test]
+fn a_pairing_polled_from_a_thread_with_no_runtime_is_unreached() {
+    let pairing = format!("{GOOD_TICKET}-123456");
+    let error = poll_on_this_thread(mp_pair(pairing, None, offline_options(), 150))
+        .expect_err("nothing is listening");
+    assert!(
+        matches!(
+            error,
+            MpPairError::Unreached {
+                why: MpUnreached::TimedOut { within_ms: 150 }
+            }
+        ),
+        "{error:?}"
     );
 }
 
