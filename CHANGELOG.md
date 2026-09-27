@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.1...build/v0.4.2) - 2026-09-26
+
+### Fixed
+
+- *(release)* a release is tagged on the commit its artifact was built from ([#40](https://github.com/mmogr/modelpipe-ffi/pull/40))
+- *(runtime)* every export runs with the library runtime entered, so a pipe's tasks land on its two workers ([#39](https://github.com/mmogr/modelpipe-ffi/pull/39))
+
+### Other
+
+- *(deps)* the binding is built against modelpipe 0.8.1 ([#41](https://github.com/mmogr/modelpipe-ffi/pull/41))
+- *(release)* pin the v0.4.1 XCFramework checksum
+
 ## [0.4.1](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.0...build/v0.4.1) - 2026-09-23
 
 ### Other
