@@ -440,3 +440,42 @@ async fn a_key_pairing_cannot_use_is_replaced_and_pairing_goes_on() {
         "the unusable key is still there"
     );
 }
+
+/// A pairing that fails for a reason that is not about the key leaves the key
+/// alone, as a dial does.
+///
+/// Only `PairError::Connect(ConnectError::Identity)` sends a pairing round
+/// again. A machine that is not there is `Unreached`, and a pairing that threw
+/// the key away for that would cost this device its fingerprint on a machine
+/// it has already met, every time that machine was switched off. The first
+/// pairing mints the key; the second fails the same way and must leave it as
+/// it was.
+#[tokio::test]
+async fn a_pairing_that_fails_for_another_reason_leaves_the_key_alone() {
+    let scratch = Scratch::new("pairing-other-failure-keeps-key");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    let keeping_a_key = || MpConnectOptions {
+        identity_dir: Some(scratch.as_str().to_owned()),
+        ..offline_options()
+    };
+
+    let first = mp_pair(format!("{GOOD_TICKET}-123456"), None, keeping_a_key(), 150)
+        .await
+        .expect_err("nothing is listening at the vector ticket");
+    assert!(matches!(first, MpPairError::Unreached { .. }), "{first:?}");
+    let minted = std::fs::read(&path).expect("a key was minted");
+
+    let error = mp_pair(format!("{GOOD_TICKET}-123456"), None, keeping_a_key(), 150)
+        .await
+        .expect_err("nothing is listening at the vector ticket");
+
+    assert!(
+        matches!(error, MpPairError::Unreached { .. }),
+        "this test needs a failure that is not about the key, got {error:?}"
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("the key is still there"),
+        minted,
+        "a failure that had nothing to do with the key threw it away"
+    );
+}
