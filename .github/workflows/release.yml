@@ -399,12 +399,26 @@ jobs:
             echo
           } > "${notes}"
 
+          # `--prerelease` for a build tag that carries one, as modelpipe's
+          # release does. `gh release create` leaves `make_latest` out of the
+          # request unless `--latest` is passed, and the REST API then
+          # defaults it to true, so a candidate without this flag would take
+          # the Latest badge and answer /releases/latest ahead of the last
+          # full release. A prerelease cannot be latest. The test is the
+          # hyphen semver puts before a prerelease, which is also what this
+          # workflow's second tag pattern matches on.
+          prerelease=()
+          case "${version}" in
+            *-*) prerelease=(--prerelease) ;;
+          esac
+
           gh release create "v${version}" \
             build/ModelpipeFFI.xcframework.zip \
             --target "${PIN}" \
             --title "v${version}" \
             --notes-file "${notes}" \
-            --generate-notes
+            --generate-notes \
+            "${prerelease[@]}"
 
           git fetch -q origin "+refs/tags/v${version}:refs/tags/v${version}"
           tagged="$(git rev-parse "v${version}^{commit}")"
