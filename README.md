@@ -102,9 +102,14 @@ alternative is a device that can never dial that machine again. A file half
 written by a process that was killed is enough to earn it, and that is the
 shape modelpipe before 0.7.0-rc.1 could leave behind.
 
-Once, and only when there was a file to throw away, and only when the
-refusal was about the key: a dial that fails for any other reason leaves the
-key untouched. A pairing does the same, which it could not do before —
+Once, and only when the refusal was about the key: a dial that fails for any
+other reason leaves the key untouched, and when there was no file before the
+dial and still is none, or the file cannot be removed (as when a directory
+stands where the key belongs), the caller gets the refusal. And only the file that was there when the dial began is thrown
+away. Two dials refused over one file race, and by the time the second is
+refused the first may have thrown the file away and put a new key in its
+place, which its live pipe runs on. That key stays, and the second dial
+tries again on it. A pairing does the same, which it could not do before —
 `MpPairError` folds every transport failure into one sentence, so the retry is
 written underneath that, against modelpipe's own error, and no new case
 crosses into Swift. It is safe there because `modelpipe::pair` dials, waits to

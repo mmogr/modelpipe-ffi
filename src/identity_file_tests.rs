@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -187,14 +188,20 @@ fn resolving_creates_nothing() {
 /// Throwing a key away says whether there was one, which is the answer a
 /// caller needs to decide whether dialling again could go any differently.
 #[test]
-fn discard_removes_the_key_and_says_whether_there_was_one() {
+fn make_way_removes_the_key_and_says_whether_there_was_one() {
     let scratch = Scratch::new("discard-says-so");
     let path = scratch.path().join(GOOD_TICKET_KEY);
     fs::write(&path, b"anything at all").expect("the scratch directory is writable");
 
-    assert!(discard(&path), "a file that was there reported as absent");
+    assert!(
+        make_way(&path, Stamp::of(&path)),
+        "a file that was there reported as absent"
+    );
     assert!(!path.exists());
-    assert!(!discard(&path), "there was nothing left to throw away");
+    assert!(
+        !make_way(&path, Stamp::of(&path)),
+        "there was nothing left to throw away"
+    );
 }
 
 /// What a key looks like is modelpipe's to judge. This side is told only that
@@ -202,7 +209,7 @@ fn discard_removes_the_key_and_says_whether_there_was_one() {
 /// forming a second opinion about the format — and without reading a key it
 /// has no reason to hold.
 #[test]
-fn discard_does_not_judge_what_is_in_the_file() {
+fn make_way_does_not_judge_what_is_in_the_file() {
     let scratch = Scratch::new("discard-does-not-judge");
     let path = scratch.path().join(GOOD_TICKET_KEY);
     fs::write(
@@ -211,7 +218,7 @@ fn discard_does_not_judge_what_is_in_the_file() {
     )
     .expect("the scratch directory is writable");
 
-    assert!(discard(&path));
+    assert!(make_way(&path, Stamp::of(&path)));
     assert!(!path.exists());
 }
 
@@ -224,8 +231,189 @@ fn a_path_that_is_a_directory_is_not_discarded() {
     fs::create_dir(&path).expect("the scratch directory is writable");
 
     assert!(
-        !discard(&path),
+        !make_way(&path, Stamp::of(&path)),
         "a directory was reported as a key thrown away"
     );
     assert!(path.is_dir(), "the directory was removed");
+}
+
+/// What the dials below are refused with: a stand-in for modelpipe's error,
+/// since the rule is about the file and not about what refused it.
+const REFUSED: &str = "the key file could not be used";
+
+/// Put a new key at `path` the way another dial does after throwing the old
+/// one away: written beside it first, then linked into place. The new file
+/// exists before the old one goes, so it cannot be given the old one's inode.
+fn replace_as_another_dial_would(path: &Path, key: &[u8]) {
+    let minted = path.with_extension("minted");
+    fs::write(&minted, key).expect("the scratch directory is writable");
+    fs::remove_file(path).expect("the old key is there to throw away");
+    fs::hard_link(&minted, path).expect("nothing is at the path any more");
+    fs::remove_file(&minted).expect("the temporary is there");
+}
+
+/// The race this guards: two dials refused over one file. The other one has
+/// already thrown the file away and linked its own key into place by the
+/// time this one is refused, and its live pipe runs on that key. Removing it
+/// here would leave the file holding a key no pipe is using, so it stays, and
+/// this dial dials again on it: two dials on one key, which is one device.
+#[tokio::test]
+async fn a_key_another_dial_put_in_place_meanwhile_is_kept_and_dialled_on() {
+    let scratch = Scratch::new("replaced-key-kept");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    fs::write(&path, b"not a key at all\n").expect("writable");
+    // The same length as the file it replaces, so length alone cannot tell
+    // the two apart.
+    let theirs = b"their key, live!\n";
+    let dials = Cell::new(0);
+
+    let result = dial_healing(
+        Some(&path),
+        |_: &&str| true,
+        || {
+            dials.set(dials.get() + 1);
+            let outcome = if dials.get() == 1 {
+                replace_as_another_dial_would(&path, theirs);
+                Err(REFUSED)
+            } else {
+                assert_eq!(
+                    fs::read(&path).expect("a key to dial on"),
+                    theirs,
+                    "dialled again on something other than the other dial's key"
+                );
+                Ok(())
+            };
+            async move { outcome }
+        },
+    )
+    .await;
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(dials.get(), 2, "the refusal went to the caller");
+    assert_eq!(
+        fs::read(&path).expect("the other dial's key is still there"),
+        theirs,
+        "the key another dial put in place was thrown away"
+    );
+}
+
+/// The case the retry exists for still works: a refused key that nobody else
+/// has touched is thrown away before the second dial, which then mints.
+#[tokio::test]
+async fn an_unchanged_refused_key_is_thrown_away_before_the_second_dial() {
+    let scratch = Scratch::new("unchanged-key-discarded");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    fs::write(&path, b"not a key at all\n").expect("writable");
+    let dials = Cell::new(0);
+
+    let result = dial_healing(
+        Some(&path),
+        |_: &&str| true,
+        || {
+            dials.set(dials.get() + 1);
+            let outcome = if dials.get() == 1 {
+                Err(REFUSED)
+            } else {
+                assert!(
+                    !path.exists(),
+                    "dialled again with the refused key still there"
+                );
+                Ok(())
+            };
+            async move { outcome }
+        },
+    )
+    .await;
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(dials.get(), 2);
+}
+
+/// Two dials that start with no file both mint, and modelpipe links a new
+/// key only where nothing is, so the one that links second is refused. The
+/// key that is there is the other dial's: this one keeps it and dials on it.
+#[tokio::test]
+async fn a_key_that_appeared_during_the_dial_is_kept_and_dialled_on() {
+    let scratch = Scratch::new("appeared-key-kept");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    let theirs = b"minted by another dial\n";
+    let dials = Cell::new(0);
+
+    let result = dial_healing(
+        Some(&path),
+        |_: &&str| true,
+        || {
+            dials.set(dials.get() + 1);
+            let outcome = if dials.get() == 1 {
+                fs::write(&path, theirs).expect("writable");
+                Err(REFUSED)
+            } else {
+                Ok(())
+            };
+            async move { outcome }
+        },
+    )
+    .await;
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(dials.get(), 2, "the refusal went to the caller");
+    assert_eq!(
+        fs::read(&path).expect("the other dial's key is still there"),
+        theirs,
+        "a key this dial never saw was thrown away"
+    );
+}
+
+/// A file another dial has thrown away, before it links its own, is gone for
+/// this dial too: there is nothing left to throw away, and the second dial
+/// goes ahead rather than reporting a refusal of a file that is no longer
+/// there.
+#[tokio::test]
+async fn a_key_another_dial_threw_away_meanwhile_is_dialled_past() {
+    let scratch = Scratch::new("thrown-key-dialled-past");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    fs::write(&path, b"not a key at all\n").expect("writable");
+    let dials = Cell::new(0);
+
+    let result = dial_healing(
+        Some(&path),
+        |_: &&str| true,
+        || {
+            dials.set(dials.get() + 1);
+            let outcome = if dials.get() == 1 {
+                fs::remove_file(&path).expect("the key is there to throw away");
+                Err(REFUSED)
+            } else {
+                Ok(())
+            };
+            async move { outcome }
+        },
+    )
+    .await;
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(dials.get(), 2, "the refusal went to the caller");
+}
+
+/// A refusal that is not about the key leaves it alone and is not retried.
+#[tokio::test]
+async fn a_refusal_the_predicate_does_not_claim_leaves_the_key_alone() {
+    let scratch = Scratch::new("other-refusal-keeps-key");
+    let path = scratch.path().join(GOOD_TICKET_KEY);
+    fs::write(&path, b"a key\n").expect("writable");
+    let dials = Cell::new(0);
+
+    let result = dial_healing(
+        Some(&path),
+        |_: &&str| false,
+        || {
+            dials.set(dials.get() + 1);
+            async { Err::<(), _>(REFUSED) }
+        },
+    )
+    .await;
+
+    assert_eq!(result, Err(REFUSED));
+    assert_eq!(dials.get(), 1);
+    assert_eq!(fs::read(&path).expect("still there"), b"a key\n");
 }

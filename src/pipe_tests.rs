@@ -578,7 +578,7 @@ async fn an_empty_key_file_is_replaced() {
     );
 }
 
-/// Once, and only when something was thrown away.
+/// Not again when nothing could be thrown away.
 ///
 /// A directory standing where the key belongs cannot be removed, so there is
 /// nothing to throw away and the refusal goes to the caller rather than

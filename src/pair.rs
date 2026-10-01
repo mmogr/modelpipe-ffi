@@ -62,36 +62,25 @@ pub async fn mp_pair(
         // then chats.
         let identity = identity_file::resolve(options.identity_dir.as_deref(), pairing.ticket());
         let reach_within = Duration::from_millis(reach_within_ms);
-        let paired = match modelpipe::pair(
-            &pairing,
-            label.as_deref(),
-            options.apply(identity.as_deref()),
-            reach_within,
-        )
-        .await
-        {
-            Ok(paired) => paired,
-            // `mp_connect`'s arm, one variant out. `PairError::Connect` is
-            // raised before the code is presented -- modelpipe dials, waits
-            // to reach the far machine and only then exchanges -- so a second
-            // attempt cannot spend a one-time code that a first attempt
-            // already spent. The variant that could, `Exchange`, is
-            // deliberately not matched here.
-            Err(error) => {
-                let discarded = matches!(error, PairError::Connect(ConnectError::Identity { .. }))
-                    && identity.as_deref().is_some_and(identity_file::discard);
-                if !discarded {
-                    return Err(error.into());
-                }
+        // `mp_connect`'s predicate, one variant out. `PairError::Connect` is
+        // raised before the code is presented -- modelpipe dials, waits to
+        // reach the far machine and only then exchanges -- so a second
+        // attempt cannot spend a one-time code that a first attempt already
+        // spent. The variant that could, `Exchange`, is deliberately not
+        // matched here.
+        let paired = identity_file::dial_healing(
+            identity.as_deref(),
+            |error: &PairError| matches!(error, PairError::Connect(ConnectError::Identity { .. })),
+            || {
                 modelpipe::pair(
                     &pairing,
                     label.as_deref(),
                     options.apply(identity.as_deref()),
                     reach_within,
                 )
-                .await?
-            }
-        };
+            },
+        )
+        .await?;
         Ok(MpPaired {
             pipe: Arc::new(MpPipe::new(paired.handle)),
             api_key: paired.api_key,

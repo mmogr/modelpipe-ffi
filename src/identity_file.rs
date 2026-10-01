@@ -77,19 +77,105 @@ pub(crate) fn resolve(dir: Option<&str>, ticket: &Ticket) -> Option<PathBuf> {
     Some(Path::new(dir).join(file_name(ticket)))
 }
 
-/// Throw the key at `path` away, and say whether there was one to throw.
+/// Dial with the key at `path`, and when the dial refuses that key, throw it
+/// away and dial once more.
 ///
-/// `false` is the answer that stops a caller dialling again: it means the
+/// Once, and only when [`make_way`] says the second dial could go
+/// differently: not when the refusal was about the directory rather than the
+/// key, where dialling again fails the same way. `refuses_the_key` is the
+/// predicate, written at each call site against modelpipe's own error before
+/// it is flattened, because it is the one part of this worth reading there.
+///
+/// The file is looked at before the first dial, because nothing serialises
+/// two dials that resolve one path. Two refused over one file both arrive
+/// here, and by the time the second does, the first may have thrown the file
+/// away and linked a new key into place, which its live pipe runs on. The
+/// second leaves that key where it is and dials on it too, which makes two
+/// dials on one key: one device, as normal. Throwing it away instead would
+/// leave the first dial's live pipe on a key the file no longer holds, so the
+/// next launch would present a different one.
+pub(crate) async fn dial_healing<T, E, Fut>(
+    path: Option<&Path>,
+    refuses_the_key: impl Fn(&E) -> bool,
+    mut dial: impl FnMut() -> Fut,
+) -> Result<T, E>
+where
+    Fut: Future<Output = Result<T, E>>,
+{
+    let before = path.map(|path| (path, Stamp::of(path)));
+    match dial().await {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            let again = refuses_the_key(&error)
+                && before.is_some_and(|(path, stamp)| make_way(path, stamp));
+            if !again {
+                return Err(error);
+            }
+            dial().await
+        }
+    }
+}
+
+/// Enough of a file to tell it from one put in its place: which file it is
+/// where the platform says (device and inode), its length, and when it was
+/// last written. Read from the path itself, as `remove_file` acts on it.
+///
+/// Not proof: a replacement with the same inode, length and timestamp passes
+/// for the original, and the file can still change between this look and the
+/// removal. It narrows that window to two system calls, which a lock across
+/// the whole dial would close and is more machinery than the hazard has
+/// earned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Stamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    file: (u64, u64),
+}
+
+impl Stamp {
+    /// What is at `path` now, or `None` when nothing is.
+    pub(crate) fn of(path: &Path) -> Option<Self> {
+        let meta = std::fs::symlink_metadata(path).ok()?;
+        Some(Self {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            #[cfg(unix)]
+            file: {
+                use std::os::unix::fs::MetadataExt as _;
+                (meta.dev(), meta.ino())
+            },
+        })
+    }
+}
+
+/// After a refusal of the key at `path`, clear the way for one more dial, and
+/// say whether that dial could go any differently.
+///
+/// When the path no longer holds the file `before` describes, another dial
+/// has been at it since this one looked: thrown the file away, linked its own
+/// key in, or both. Whatever is there now is that dial's, so it is left
+/// alone, and `true` sends this one to dial again on what the path holds
+/// then. When it is still the same file, the file is thrown away, and `true`
+/// says it was.
+///
+/// `false` is the answer that stops a caller dialling again: there was no
+/// file and still is none, or the file could not be removed. Either way the
 /// refusal was about the directory or the path rather than about the file's
 /// contents, and a second attempt fails the same way for as long as anyone
-/// lets it. Removing a path that is a directory fails too, which is the
+/// lets it; removing a path that is a directory fails too, which is the
 /// answer wanted there.
 ///
 /// Nothing is read first. What a key looks like is modelpipe's to judge, and
 /// a second opinion about its format here is the duplication this seam exists
 /// to refuse — this side only ever hears that the file could not be used.
-pub(crate) fn discard(path: &Path) -> bool {
-    std::fs::remove_file(path).is_ok()
+pub(crate) fn make_way(path: &Path, before: Option<Stamp>) -> bool {
+    if Stamp::of(path) != before {
+        return true;
+    }
+    // `is_some` first: with no file before the dial, a key linked in between
+    // the look above and the removal would otherwise be removed.
+    before.is_some() && std::fs::remove_file(path).is_ok()
 }
 
 #[cfg(test)]

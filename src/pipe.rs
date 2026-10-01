@@ -67,28 +67,15 @@ pub async fn mp_connect(ticket: String, options: MpConnectOptions) -> Result<Arc
         // name is a contract with the app rather than this crate's business
         // alone.
         let identity = identity_file::resolve(options.identity_dir.as_deref(), &ticket);
-        match modelpipe::connect(&ticket, options.apply(identity.as_deref())).await {
-            Ok(handle) => Ok(Arc::new(MpPipe::new(handle))),
-            // Matched against modelpipe's own error, before the `From` below
-            // flattens it. Exactly once, and only when a file was actually
-            // removed: with nothing thrown away the refusal is about the
-            // directory rather than the key, and dialling again fails the
-            // same way. Straight-line rather than a loop, because "once" is
-            // the whole of the rule. The same six lines are in `mp_pair`,
-            // against the variant that wraps this one; a combinator over two
-            // error types and two results would hide the predicate, which is
-            // the only part worth reading.
-            Err(error) => {
-                let discarded = matches!(error, ConnectError::Identity { .. })
-                    && identity.as_deref().is_some_and(identity_file::discard);
-                if !discarded {
-                    return Err(error.into());
-                }
-                let handle =
-                    modelpipe::connect(&ticket, options.apply(identity.as_deref())).await?;
-                Ok(Arc::new(MpPipe::new(handle)))
-            }
-        }
+        // Matched against modelpipe's own error, before the `From` behind the
+        // `?` flattens it. `mp_pair` passes the variant that wraps this one.
+        let handle = identity_file::dial_healing(
+            identity.as_deref(),
+            |error: &ConnectError| matches!(error, ConnectError::Identity { .. }),
+            || modelpipe::connect(&ticket, options.apply(identity.as_deref())),
+        )
+        .await?;
+        Ok(Arc::new(MpPipe::new(handle)))
     })
     .await
 }
