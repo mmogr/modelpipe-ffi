@@ -321,12 +321,15 @@ pair that links but disagrees on a checksum fails here, where a gate that only
 linked would pass it. Everything before it tests the repository; this tests
 the release.
 
-That step has not yet passed on the runner. In every release run from v0.1.2
-to v0.4.1 the runner's download of the zip stalled and the step was stopped
-([#24](https://github.com/mmogr/modelpipe-ffi/issues/24)). Until that is
-fixed, a red last step after a green "Create the release" means the release
-exists and its tag is the pin, and the release has to be checked from a
-machine: resolve the version from a scratch package, as the step does.
+That step had not passed on the runner up to v0.4.2. In every release run
+from v0.1.2 to v0.4.2 SwiftPM's download of the zip stalled and the step was
+stopped ([#24](https://github.com/mmogr/modelpipe-ffi/issues/24)). The step
+now downloads the zip with curl, four attempts of at most two minutes each,
+into the cache SwiftPM reads before downloading, and SwiftPM still checks it
+against the manifest's checksum. If that step is red after a green "Create
+the release", the release exists and its tag is the pin, and the release has
+to be checked from a machine: resolve the version from a scratch package, as
+the step does.
 A re-run publishes nothing further: `verify` and the pin step refuse a version
 whose pin or release already exists.
 

@@ -433,8 +433,8 @@ jobs:
       # checksum; the download matches that checksum; the binding compiles
       # against it; the linker settings the package declares are enough to link
       # a consumer that declares none; and the library answers a call.
-      # `swift build` resolves the package first, which is what performs the
-      # download and the checksum verification, and writes the revision it
+      # `swift build` resolves the package first, which is what checks the
+      # downloaded zip against that checksum, and writes the revision it
       # resolved to Package.resolved; an executable is what forces a final
       # link. The revision check here and the pin step's checks (the pin's
       # parent is the built commit, and it changes only Package.swift) are what
@@ -454,10 +454,36 @@ jobs:
         # wedged the v0.1.2 run for 70 minutes on a 210 MB fetch that takes
         # about 30 seconds, with no output after `Downloading binary artifact`.
         # The release was already published by then, so the run could neither
-        # finish nor be usefully re-run. Ten minutes is ~20x the healthy time.
-        timeout-minutes: 10
+        # finish nor be usefully re-run. The download below now has limits of
+        # its own, at most four attempts of two minutes; this cap is that plus
+        # the build, and stays as the guard for everything else in the step.
+        timeout-minutes: 15
         run: |
           version="${GITHUB_REF_NAME#build/v}"
+
+          # The download is curl's rather than SwiftPM's. Every release run
+          # from v0.1.2 to v0.4.2 stalled in SwiftPM's fetch of this zip, and
+          # from v0.1.3 on the cap above stopped it (#24), while the same zip
+          # took seconds from a Mac. curl gives each attempt two minutes and
+          # tries three more times. The zip goes where SwiftPM's shared cache
+          # keeps a binary artifact: `artifacts/` under `--cache-path`, named
+          # by the URL with every character that is not a letter or a digit
+          # made `_`. The build then says it fetched the zip "from cache" and
+          # still checks it against the checksum in the manifest at the tag,
+          # so a zip that does not match fails the build as a download would.
+          # If that naming ever changes, SwiftPM downloads the zip itself, as
+          # it did before.
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}/ModelpipeFFI.xcframework.zip"
+          cache="$(mktemp -d)"
+          mkdir -p "${cache}/artifacts"
+          if ! curl --fail --location --silent --show-error \
+              --max-time 120 --retry 3 --retry-all-errors \
+              --output "${cache}/artifacts/$(printf '%s' "${url}" | LC_ALL=C sed 's/[^A-Za-z0-9]/_/g')" \
+              "${url}"; then
+            echo "::error::v${version} is released, but its zip did not download here in four attempts; README.md, Releasing, says how to check it from a machine"
+            exit 1
+          fi
+
           gate="$(mktemp -d)"
           mkdir -p "${gate}/Sources/ResolveGate"
 
@@ -503,11 +529,11 @@ jobs:
           SWIFT
 
           cd "${gate}"
-          swift build
+          swift build --cache-path "${cache}"
           resolved="$(jq -r '.pins[] | select(.identity == "modelpipe-ffi") | .state.revision' Package.resolved)"
           if [[ "${resolved}" != "${PIN}" ]]; then
             echo "::error::v${version} resolved to '${resolved}', not the pin ${PIN}"
             exit 1
           fi
-          swift run ResolveGate
+          swift run --cache-path "${cache}" ResolveGate
           echo "a consumer resolved v${version}, downloaded the artifact, linked it, and called into it"
