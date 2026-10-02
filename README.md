@@ -281,6 +281,15 @@ Nothing fails; a person is simply shown the inside of the binding. The smoke
 test asserts `message()` contains none of that shape, so the two cannot
 quietly become the same thing.
 
+## Updating dependencies
+
+Dependabot updates weekly. To update now, run
+Actions -> Update dependencies -> Run workflow, or
+`gh workflow run update-deps.yml -R mmogr/modelpipe-ffi [-f package=modelpipe]`:
+it runs `cargo update` (or `cargo update --package <name>`), opens one PR
+listing each package as `name old -> new`, opens nothing when nothing moved,
+and fails instead of putting a modelpipe prerelease in the lock.
+
 ## Releasing
 
 [release-plz](https://release-plz.dev) maintains a release PR on every push to
