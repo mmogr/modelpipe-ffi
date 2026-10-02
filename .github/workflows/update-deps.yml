@@ -1,0 +1,183 @@
+# Updates the lock on demand and opens a PR for it, for when Dependabot's
+# weekly schedule (.github/dependabot.yml) is not soon enough. This runs only
+# when someone runs it: Actions -> Update dependencies -> Run workflow, or
+# `gh workflow run update-deps.yml -R mmogr/modelpipe-ffi [-f package=<name>]`.
+#
+# The update is `cargo update`, or `cargo update --package <name>` when a
+# package is named. Cargo prefers releases whose own `rust-version` is no
+# newer than this crate's, so "newest" means the newest such release a range
+# allows. When a version moved, the run opens one PR whose commit and
+# description list each package as `name old -> new`. When none did, it says
+# so in the run summary and pushes nothing.
+#
+# A modelpipe prerelease in the updated lock fails the run before anything is
+# pushed. Cargo.toml says why: a release candidate in the lock would be
+# statically linked into something that ships to a phone.
+#
+# The checkout, the push and the PR authenticate with RELEASE_PAT, for the
+# reason release-plz.yml gives: a branch pushed or a PR opened with the
+# default GITHUB_TOKEN starts no workflows, so the PR would get no CI and
+# could never pass the required check.
+name: Update dependencies
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "One dependency to update, for example modelpipe. Leave empty to update everything the version ranges allow."
+        required: false
+        default: ""
+        type: string
+
+# Nothing here uses the default token: every call that reads or writes the
+# repository passes RELEASE_PAT.
+permissions: {}
+
+# One run at a time. A second waits rather than cancelling the first, which
+# could stop it between its push and its PR and leave a branch with no PR.
+concurrency:
+  group: update-deps
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  update:
+    name: Update dependencies
+    runs-on: ubuntu-latest
+    # Forks have no RELEASE_PAT.
+    if: github.repository_owner == 'mmogr'
+    # A stall guard, not a budget: the default is six hours.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          token: ${{ secrets.RELEASE_PAT }}
+          # The push below passes the token itself, so none is left in
+          # .git/config while cargo runs.
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      # The input reaches the shell as an environment variable, never as an
+      # expression pasted into the script, so a package name is only ever an
+      # argument.
+      - name: Update the lock
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          cp Cargo.lock "${RUNNER_TEMP}/Cargo.lock.before"
+          if [[ -n "${PACKAGE}" ]]; then
+            cargo update --package "${PACKAGE}"
+          else
+            cargo update
+          fi
+
+      # Read off the two locks rather than cargo's output, so the list is
+      # what the commit holds. A name can be locked at more than one version,
+      # so `name version` pairs are compared, and a package the update added
+      # or removed shows (none) on that side.
+      - name: List what moved
+        id: changes
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          export LC_ALL=C
+          pairs() {
+            awk -F'"' '
+              /^name = /    { name = $2 }
+              /^version = / { if (name != "") print name " " $2; name = "" }
+            ' "$1" | sort -u
+          }
+          before="${RUNNER_TEMP}/before.txt"
+          after="${RUNNER_TEMP}/after.txt"
+          changes="${RUNNER_TEMP}/changes.txt"
+          pairs "${RUNNER_TEMP}/Cargo.lock.before" > "${before}"
+          pairs Cargo.lock > "${after}"
+          {
+            comm -23 "${before}" "${after}" | sed 's/^/old /'
+            comm -13 "${before}" "${after}" | sed 's/^/new /'
+          } | awk '
+            { seen[$2] = 1 }
+            $1 == "old" { old[$2] = ($2 in old) ? old[$2] ", " $3 : $3 }
+            $1 == "new" { new[$2] = ($2 in new) ? new[$2] ", " $3 : $3 }
+            END {
+              for (name in seen) {
+                print name " " ((name in old) ? old[name] : "(none)") " -> " ((name in new) ? new[name] : "(none)")
+              }
+            }
+          ' | sort > "${changes}"
+
+          if [[ ! -s "${changes}" ]]; then
+            echo "Nothing to update: ${PACKAGE:-every dependency} already resolves to the newest version its range allows." >> "${GITHUB_STEP_SUMMARY}"
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+          cat "${changes}"
+
+      # Checks every modelpipe entry in the updated lock, not only the one
+      # the update moved. Build metadata after a `+` may hold a hyphen
+      # without being a prerelease, so it is cut off before the check.
+      - name: Refuse a modelpipe prerelease
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          prerelease="$(awk -F'"' '
+            /^name = "modelpipe"$/ { found = 1; next }
+            found && /^version = / {
+              version = $2
+              sub(/\+.*/, "", version)
+              if (version ~ /-/) print $2
+              found = 0
+            }
+          ' Cargo.lock)"
+          if [[ -n "${prerelease}" ]]; then
+            echo "::error::the updated lock holds modelpipe ${prerelease//$'\n'/, }, a prerelease, so this run opens no PR"
+            echo "::error::Cargo.toml: never build a release with a release candidate in the lock"
+            exit 1
+          fi
+          echo "no modelpipe prerelease in the lock"
+
+      - name: Open the PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          PACKAGE: ${{ inputs.package }}
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          branch="chore(deps)/update-run-${GITHUB_RUN_NUMBER}"
+          if [[ -n "${PACKAGE}" ]]; then
+            subject="chore(deps): the lock resolves ${PACKAGE} to the newest version its range allows"
+          else
+            subject="chore(deps): the lock resolves every dependency to the newest version its range allows"
+          fi
+          changes="${RUNNER_TEMP}/changes.txt"
+          message="${RUNNER_TEMP}/message.txt"
+          body="${RUNNER_TEMP}/body.md"
+          { echo "${subject}"; echo; cat "${changes}"; } > "${message}"
+          {
+            sed 's/^/- /' "${changes}"
+            echo
+            echo "Opened by the Update dependencies workflow: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } > "${body}"
+
+          git switch -c "${branch}"
+          git add Cargo.lock
+          git -c user.name=mmogr \
+              -c user.email=172192206+mmogr@users.noreply.github.com \
+              commit -q -F "${message}"
+
+          # A plain push, never forced. A re-run keeps its run number, so it
+          # cannot push over a branch an earlier attempt pushed; start a new
+          # run instead.
+          git push "https://x-access-token:${RELEASE_PAT}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:refs/heads/${branch}"
+          url="$(gh pr create --repo "${GITHUB_REPOSITORY}" --base main --head "${branch}" \
+              --title "${subject}" --body-file "${body}" \
+              --label dependencies --label rust)"
+          echo "Opened ${url}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Opened ${url}"
