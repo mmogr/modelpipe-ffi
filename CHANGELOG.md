@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.2...build/v0.4.3) - 2026-10-02
+
+### Fixed
+
+- *(identity)* a refused dial no longer removes a key another dial has just put in place ([#44](https://github.com/mmogr/modelpipe-ffi/pull/44))
+
+### Other
+
+- *(deps)* the lock resolves modelpipe to the newest version its range allows ([#47](https://github.com/mmogr/modelpipe-ffi/pull/47))
+- *(deps)* an Update dependencies run updates the lock on demand and opens a PR for it ([#45](https://github.com/mmogr/modelpipe-ffi/pull/45))
+- *(deps)* bump uniffi from 0.32.1 to 0.32.2 ([#43](https://github.com/mmogr/modelpipe-ffi/pull/43))
+- *(release)* pin the v0.4.2 XCFramework checksum
+
 ## [0.4.2](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.1...build/v0.4.2) - 2026-09-26
 
 ### Fixed
