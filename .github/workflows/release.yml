@@ -60,7 +60,7 @@ env:
 jobs:
   verify:
     name: Verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Nothing here is slow; this is a stall guard, not a budget.
     timeout-minutes: 20
     outputs:
