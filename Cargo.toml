@@ -78,6 +78,23 @@ tokio-util = "0.7"
 # to a phone. `Digest::digest` is behind neither that nor `alloc`.
 sha2 = { version = "0.11", default-features = false }
 
+# Held at 0.2.189 for the two iOS slices, not for anything this crate calls:
+# nothing in src/ uses libc. 0.2.190 stopped exposing on iOS the API only
+# macOS has (rust-lang/libc#5158), which is right, but netdev, underneath
+# modelpipe by way of iroh and netwatch, still names one of those items,
+# `in6_ifreq`, on every Apple target. With 0.2.190 in the lock,
+# aarch64-apple-ios and aarch64-apple-ios-sim stop compiling while macOS and
+# Linux build as before, so only the Apple job sees it.
+#
+# Scoped to Apple targets because that is where it matters, but the lock is
+# resolved for every target at once, so this bounds `cargo update` on any
+# machine. Lift it once a netdev release that netwatch's range admits builds
+# for aarch64-apple-ios against a newer libc, and drop the libc ignore in
+# .github/dependabot.yml in the same change: it exists only so Dependabot
+# does not propose the release this line refuses.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+libc = "=0.2.189"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
