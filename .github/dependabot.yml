@@ -6,6 +6,12 @@ updates:
       interval: weekly
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      # Cargo.toml holds libc at 0.2.189 and says why. Without this,
+      # Dependabot proposes the release that line refuses, and the PR is red
+      # on the Apple job. Remove it in the change that lifts the hold.
+      - dependency-name: libc
+        versions: [">= 0.2.190"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
