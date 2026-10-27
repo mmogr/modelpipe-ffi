@@ -1683,9 +1683,9 @@ dependencies = [
 
 [[package]]
 name = "modelpipe"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91c56221ec5b8d680b389ea4573b0c0abe818fe336d66f74b01a41e82727aa10"
+checksum = "4e1c449a1c0bad80bc3bf3723152b791f15e7baac5e65684c1d1d5b57d64f487"
 dependencies = [
  "getrandom 0.4.3",
  "httparse",
