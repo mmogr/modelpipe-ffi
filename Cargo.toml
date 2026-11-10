@@ -143,7 +143,16 @@ redundant_pub_crate = "allow"
 
 [profile.release]
 opt-level = 2
-lto = "thin"
+# No LTO, and the setting is load-bearing. With `lib` among the crate types,
+# cargo passes this crate no `-C lto` at all, so `lto = "thin"` optimised
+# nothing here; what it did do was compile every dependency with its LLVM
+# bitcode embedded, for an LTO step that never ran, and the static library
+# bundles those objects as they are. That was 104 MB of each 164 MB slice,
+# which Xcode, which no longer takes bitcode, never reads. Off, the machine
+# code is the same to within 2 KB and each slice is 60 MB. check-slices.sh
+# fails a release slice that grows past its ceiling, so this cannot quietly
+# return.
+lto = false
 codegen-units = 16
 # Cargo strips debug info from a release build by default, proc macros
 # included. Xcode 27's `strip` can leave a library's string pool off an 8-byte

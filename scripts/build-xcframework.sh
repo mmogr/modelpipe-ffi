@@ -178,6 +178,11 @@ echo "==> Checking each slice is what it claims to be"
 # the difference is the load command inside the object. A build that says
 # "succeeded" while linking a Linux or macOS object into the iOS slice would
 # fail at `import` time in Xcode, a week later, in someone else's project.
+# A release slice also has a size ceiling: see SLICE_CEILING_MB there. A dev
+# build carries debug info and is not held to it.
+if [[ "${PROFILE}" != "dev" ]]; then
+    export SLICE_CEILING_MB="${SLICE_CEILING_MB:-100}"
+fi
 "${ROOT_DIR}/scripts/check-slices.sh" "${FRAMEWORK}"
 
 echo
