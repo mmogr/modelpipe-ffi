@@ -7,17 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.3](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.2...build/v0.4.3) - 2026-10-02
+## [0.4.3](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.2...build/v0.4.3) - 2026-11-10
+
+Set on 2026-10-02 by [#42](https://github.com/mmogr/modelpipe-ffi/pull/42)
+and released five weeks later: GitHub fired no push event for that merge, so
+it was never tagged, and release-plz does not reopen a version it has already
+written up. A check now fails when that happens
+([#79](https://github.com/mmogr/modelpipe-ffi/pull/79)). Everything merged in
+between ships here.
 
 ### Fixed
 
 - *(identity)* a refused dial no longer removes a key another dial has just put in place ([#44](https://github.com/mmogr/modelpipe-ffi/pull/44))
+- *(build)* a release build works on macOS 27 ([#68](https://github.com/mmogr/modelpipe-ffi/pull/68))
+- *(release)* a version on main that was never tagged fails a check, daily and on every push ([#79](https://github.com/mmogr/modelpipe-ffi/pull/79))
+- *(ci)* a smoke test that fails fails the script, wherever timeout is installed ([#63](https://github.com/mmogr/modelpipe-ffi/pull/63))
+- *(ci)* every commit on main gets a CI run of its own ([#64](https://github.com/mmogr/modelpipe-ffi/pull/64))
+- *(gates)* the credential check reads every exported signature whole, and the records calls take ([#66](https://github.com/mmogr/modelpipe-ffi/pull/66))
+
+### Changed
+
+- *(build)* the binding generator stays out of the static library ([#69](https://github.com/mmogr/modelpipe-ffi/pull/69))
+- *(build)* the slices carry no LLVM bitcode: each is 60 MB rather than 222, and the zip 50 MB rather than 186 ([#70](https://github.com/mmogr/modelpipe-ffi/pull/70))
+- *(deps)* built against modelpipe 0.8.8, up from 0.8.1 ([#47](https://github.com/mmogr/modelpipe-ffi/pull/47)) ([#48](https://github.com/mmogr/modelpipe-ffi/pull/48)) ([#60](https://github.com/mmogr/modelpipe-ffi/pull/60)) ([#62](https://github.com/mmogr/modelpipe-ffi/pull/62))
+- *(deps)* uniffi 0.32.2 ([#43](https://github.com/mmogr/modelpipe-ffi/pull/43)), tokio 1.54.1 ([#49](https://github.com/mmogr/modelpipe-ffi/pull/49)) ([#59](https://github.com/mmogr/modelpipe-ffi/pull/59)), and every other dependency at the newest version its range allows ([#51](https://github.com/mmogr/modelpipe-ffi/pull/51)) ([#52](https://github.com/mmogr/modelpipe-ffi/pull/52)) ([#55](https://github.com/mmogr/modelpipe-ffi/pull/55)) ([#62](https://github.com/mmogr/modelpipe-ffi/pull/62))
 
 ### Other
 
-- *(deps)* the lock resolves modelpipe to the newest version its range allows ([#47](https://github.com/mmogr/modelpipe-ffi/pull/47))
+- *(consumers)* consumers are told to pin up to the next minor, not from: ([#71](https://github.com/mmogr/modelpipe-ffi/pull/71))
+- *(docs)* the comments and README say what the code does ([#72](https://github.com/mmogr/modelpipe-ffi/pull/72))
+- *(cleanup)* no config that does nothing ([#73](https://github.com/mmogr/modelpipe-ffi/pull/73)); the on-device spike is retired ([#74](https://github.com/mmogr/modelpipe-ffi/pull/74))
+- *(ci)* only the publishing job can write, and every job has a timeout ([#65](https://github.com/mmogr/modelpipe-ffi/pull/65)); every Linux job runs on ubuntu-26.04 ([#50](https://github.com/mmogr/modelpipe-ffi/pull/50))
+- *(ci)* the Apple job skips a change that cannot affect it ([#75](https://github.com/mmogr/modelpipe-ffi/pull/75)); rust caches are saved from main only ([#76](https://github.com/mmogr/modelpipe-ffi/pull/76)); Dependabot bumps arrive grouped ([#77](https://github.com/mmogr/modelpipe-ffi/pull/77))
 - *(deps)* an Update dependencies run updates the lock on demand and opens a PR for it ([#45](https://github.com/mmogr/modelpipe-ffi/pull/45))
-- *(deps)* bump uniffi from 0.32.1 to 0.32.2 ([#43](https://github.com/mmogr/modelpipe-ffi/pull/43))
 - *(release)* pin the v0.4.2 XCFramework checksum
 
 ## [0.4.2](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.1...build/v0.4.2) - 2026-09-26
