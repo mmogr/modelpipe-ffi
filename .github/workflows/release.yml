@@ -227,6 +227,11 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Restored, never saved. A tag run can read main's caches but no
+          # later tag run can read this one's, so a save here only spends
+          # the repository's quota.
+          save-if: false
 
       # Builds every slice and asserts each one is the platform it claims.
       - name: Build
