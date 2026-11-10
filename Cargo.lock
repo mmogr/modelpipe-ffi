@@ -69,9 +69,9 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "arc-swap"
-version = "1.9.4"
+version = "1.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db4c94f57a570fce5d381be3289b3f79aef6332d72948fe82ab5772e423ccf92"
+checksum = "84a22b5d51209f6de83d37a0b33d320acb8da88823e42a94c075140708f032a5"
 dependencies = [
  "rustversion",
 ]
@@ -1691,9 +1691,9 @@ dependencies = [
 
 [[package]]
 name = "modelpipe"
-version = "0.8.8"
+version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39ae275ba518b7ebe3baf677dd1a5f24fd0d098846e6fbbffab3fcfa63394c4f"
+checksum = "ed62bc4316869e2855a200dc7c23c84090a946ae186288893c5b9e8bcdbbd863"
 dependencies = [
  "getrandom 0.4.3",
  "httparse",
@@ -1744,9 +1744,9 @@ dependencies = [
 
 [[package]]
 name = "n0-error"
-version = "1.0.1"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26c59ea174675ce6bc196878851e5049e11b8b1f9af3ba87e4d6df8d828bb001"
+checksum = "96c2215d16de3a55894583a539e6b151fb45236c3a6da45a18a40af73dc00636"
 dependencies = [
  "n0-error-macros",
  "spez",
@@ -1754,9 +1754,9 @@ dependencies = [
 
 [[package]]
 name = "n0-error-macros"
-version = "1.0.1"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4412346410d6616f3668c40e53c298e5320c7b856f7a960e5914e442601be79f"
+checksum = "6217fd5f567ce1e53f324744c14fab04899861e397539c5f3cc08bd7c1dcd2de"
 dependencies = [
  "proc-macro2",
  "quote",
