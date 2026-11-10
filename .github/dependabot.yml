@@ -12,9 +12,25 @@ updates:
       # on the Apple job. Remove it in the change that lifts the hold.
       - dependency-name: libc
         versions: [">= 0.2.190"]
+    # One pull request a week for the dependencies this crate only builds on,
+    # rather than one each: every pull request runs the macOS job, and runs it
+    # again on main once it merges. modelpipe and uniffi stay out of the group
+    # and arrive alone. modelpipe is the crate this binds, and its bump is a
+    # release of this one; a uniffi bump changes the generated Swift, has to
+    # stay on gglib-ffi's minor, and needs `make swift` in its own change.
+    groups:
+      cargo:
+        patterns: ["*"]
+        exclude-patterns: ["modelpipe", "uniffi*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     commit-message:
       prefix: "ci(deps)"
+    # Every action in one pull request: each is pinned to a commit, and
+    # #57, #58 and #61 were three macOS runs on a PR and three more on main
+    # for three one-line bumps.
+    groups:
+      actions:
+        patterns: ["*"]
