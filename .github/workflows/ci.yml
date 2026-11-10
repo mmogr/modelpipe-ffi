@@ -198,8 +198,8 @@ jobs:
       #
       # WHAT IT DOES NOT PROVE: anything about a network. No hole punching, no
       # NAT traversal, no relay, no phone. A runner is not a device behind
-      # CGNAT. That measurement is the on-device spike, and a green run here
-      # is not a substitute for it.
+      # CGNAT. That measurement is ggchat on a phone, and a green run here is
+      # not a substitute for it.
       - name: Swift links and calls it
         run: ./scripts/swift-smoke.sh
 
