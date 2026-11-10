@@ -384,8 +384,12 @@ jobs:
             echo "## Consuming this release"
             echo
             echo '```swift'
-            echo ".package(url: \"https://github.com/${GITHUB_REPOSITORY}.git\", from: \"${version}\")"
+            echo ".package(url: \"https://github.com/${GITHUB_REPOSITORY}.git\", .upToNextMinor(from: \"${version}\"))"
             echo '```'
+            echo
+            echo "Up to the next minor rather than \`from:\`: below 1.0 a minor release"
+            echo "can add a protocol requirement or an error case, so taking one should"
+            echo "be a deliberate change."
             echo
             echo "Then \`import Modelpipe\`. The seven system frameworks the static"
             echo "library needs are declared on the package's own target, so there is"
