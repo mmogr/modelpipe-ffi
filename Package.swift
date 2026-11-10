@@ -4,9 +4,11 @@ import PackageDescription
 
 // This crate is `publish = false` and always will be: the product is an Apple
 // binary artifact, not a source tarball. THIS is how it is consumed —
-// `.package(url: "https://github.com/mmogr/modelpipe-ffi.git", from: "0.1.2")`
-// — and the two halves below are why the package exists at all rather than a
-// pair of release assets a consumer assembles by hand.
+// `.package(url: "https://github.com/mmogr/modelpipe-ffi.git", .upToNextMinor(from: "0.4.0"))`
+// — up to the next minor, because below 1.0 a minor release can break a
+// consumer (README.md, Consuming it). The two halves below are why the package
+// exists at all rather than a pair of release assets a consumer assembles by
+// hand.
 //
 // `ModelpipeFFI` is the XCFramework: three arm64 slices of a static library.
 // `Modelpipe` is the generated Swift that calls into it. They are not

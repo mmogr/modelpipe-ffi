@@ -207,7 +207,7 @@ not build it.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mmogr/modelpipe-ffi.git", from: "0.1.2"),
+    .package(url: "https://github.com/mmogr/modelpipe-ffi.git", .upToNextMinor(from: "0.4.0")),
 ],
 targets: [
     .target(
@@ -216,6 +216,13 @@ targets: [
     ),
 ]
 ```
+
+**Up to the next minor, not `from:`.** Below 1.0, `from: "0.4.0"` admits
+every 0.x release after it, and a minor release here can break a consumer: it
+can add a requirement to a protocol a consumer conforms a fake to, or a case
+to an error a consumer switches over, as 0.4.0 did to `MpPairError`. Each
+feature is a minor release, so `.upToNextMinor` takes every fix and makes
+taking a feature a deliberate change. ggchat pins this way.
 
 Then `import Modelpipe`. That is the whole of it — **the seven system
 frameworks the static library needs ship with the package**, declared on its
