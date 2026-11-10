@@ -82,6 +82,11 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Saved from main only. A PR can restore main's caches, so saving
+          # one per PR only duplicates them: #62 alone held another 1 GB of
+          # the repository's 10 GB, evicting caches main would have used.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
@@ -101,6 +106,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Lockfile guard
         run: cargo metadata --locked --format-version 1 > /dev/null
@@ -136,6 +143,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Public docs
         run: cargo doc --no-deps
@@ -209,6 +218,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Builds every slice, generates the Swift, assembles the framework, and
       # asserts each slice carries the platform load command and deployment
