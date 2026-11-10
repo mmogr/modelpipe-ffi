@@ -42,8 +42,23 @@ crate-type = ["staticlib", "cdylib", "lib"]
 # The generator, run by `make swift`. UniFFI's documented shape: a bin in the
 # crate being bound, so the generated Swift is always read out of the exact
 # scaffolding this build produced rather than a separately-versioned tool.
+#
+# Behind `bindgen`, as gglib-ffi's is. Every dependency of a package is a
+# dependency of its library, so with `uniffi/cli` on the `uniffi` line the
+# generator, clap and goblin among it, was compiled into the static library
+# and shipped in every slice: 49 MB of each 243 MB archive. The linker left it
+# out of the app, but every download and every copy of the framework carried
+# it. A slice is never built with this feature; `check-slices.sh` refuses one
+# that holds the generator.
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+# The generator and what it needs: `cli` for its command line, and
+# `cargo-metadata`, uniffi's default, which library mode uses to read the
+# crate's metadata. Off for the library, which needs neither.
+bindgen = ["uniffi/cli", "uniffi/cargo-metadata"]
 
 [dependencies]
 # The crate this binds. This line is the floor of a range, not what is
@@ -59,7 +74,10 @@ modelpipe = "0.8.1"
 # Not the `tokio` feature: all it adds is async-compat, for UniFFI's
 # `async_runtime = "tokio"`, which the runtime section of `src/lib.rs`
 # rejects. Left off, that attribute does not compile.
-uniffi = { version = "0.32", features = ["cli"] }
+#
+# No default features: the one default, `cargo-metadata`, is the generator's,
+# and `bindgen` above turns it on with the rest of the generator.
+uniffi = { version = "0.32", default-features = false }
 # Multi-thread, because modelpipe's futures are all Send (its own
 # `future_promises` pins that) and the pipe should not stall on one worker.
 tokio = { version = "1", features = ["rt-multi-thread"] }

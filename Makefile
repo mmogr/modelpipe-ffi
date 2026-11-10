@@ -65,8 +65,8 @@ surface: swift ## Fail if the smoke test does not exercise every exported member
 	@./scripts/check-swift-surface.sh
 
 swift: ## Generate the Swift binding from the built library
-	$(CARGO) build --lib
-	$(CARGO) run --bin uniffi-bindgen -- generate \
+	$(CARGO) build --lib --bin uniffi-bindgen --features bindgen
+	target/debug/uniffi-bindgen generate \
 		--library target/debug/libmodelpipe_ffi$(shell uname -s | grep -q Darwin && echo .dylib || echo .so) \
 		--language swift --no-format --out-dir build/generated-staging
 	@cp build/generated-staging/modelpipe_ffi.swift Sources/Modelpipe/
