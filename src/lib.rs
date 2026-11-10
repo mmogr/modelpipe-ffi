@@ -17,6 +17,7 @@
 //! ```text
 //! mp_connect(ticket, options) -> MpPipe
 //!     MpPipe.base_url()             -> String     "http://127.0.0.1:<port>/v1"
+//!     MpPipe.port()                 -> u16        the loopback port on its own
 //!     MpPipe.status()               -> MpPipeStatus
 //!     MpPipe.status_changed_since() -> MpPipeStatus?   (async; None ends it)
 //!     MpPipe.close_reason()         -> MpCloseReason?

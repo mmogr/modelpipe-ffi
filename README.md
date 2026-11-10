@@ -47,6 +47,7 @@ and nothing on an iPhone wants to be a backend.
 |---|---|
 | `mpConnect(ticket:options:)` | Dial. Returns once the **local port is bound**, not once the far machine answers. |
 | `pipe.baseUrl()` | `http://127.0.0.1:<port>/v1`. Stable for the pipe's life. |
+| `pipe.port()` | The loopback port on its own, for a log line or a diagnostic screen. |
 | `pipe.status()` | `idle`, `direct`, `relayed` or `closed`, now. |
 | `pipe.statusChangedSince(snapshot:)` | Waits for the next value different from `snapshot`. `nil` ends the sequence. |
 | `pipe.closeReason()` | Why it closed, or `nil` while open. |
@@ -57,8 +58,9 @@ and nothing on an iPhone wants to be a backend.
 | `pipe.peerId()` | Who this device connects as: sixty-four hex characters, stable across launches when `identityDir` is set and the same ticket is dialled. |
 | `mpPair(pairing:label:options:reachWithinMs:)` | Dial, wait to reach the far machine, redeem the code, and return `MpPaired`: the pipe still up, this device's key, the name it is held under, and the far machine's id. The key is returned once and never kept here. |
 | `mpReadPairing(pairing:)` | Read a pairing string without pairing, synchronously: the ticket in canonical form and whether there is a code, so a form can accept a paste as it is typed and know whether to ask for a token. The code never comes back. Throws `MpPairError.BadPairingString`. |
+| `MpConnectOptions()` | The dial's options, every one defaulted: `port` (`nil`, the OS picks; a fixed port is for reproducing a bug), `relayUrl` (`nil`, the public relays), `portMapping` (`true`), `discovery` (`true`; off restricts the dial to the addresses in the ticket), `relayOnly` (`false`; on forces the relay path) and `identityDir`. |
 | `MpConnectOptions.identityDir` | The directory this device keeps its endpoint keys in, so the far machine sees the same device every time — one file per far machine, named below. `nil` mints a key per process and writes nothing. |
-| `pipe.watch()` | A cancellable wait on the status sequence: `watch.next(snapshot:)` answers like `statusChangedSince`, and `watch.cancel()` ends it, before or during the wait. |
+| `pipe.watch()` | A cancellable wait on the status sequence: `watch.next(snapshot:)` answers like `statusChangedSince`, and `watch.cancel()` ends it, before or during the wait; `watch.isCancelled()` says whether it has been. |
 
 ### Where a device keeps its key
 
@@ -178,7 +180,7 @@ changed, so call it every time rather than trying to be clever about when.
 
 ```bash
 make pre-commit    # everything CI checks on Linux
-make xcframework   # the five slices and the framework (macOS, needs Xcode)
+make xcframework   # the three slices and the framework (macOS, needs Xcode)
 make checksum      # zip it and print the SwiftPM checksum
 ```
 
@@ -432,8 +434,9 @@ Worth knowing:
 ## Status
 
 Early. The crate builds, its suite passes against real loopback sockets, and
-the generated Swift has the shape ggchat's FFI seam specifies, plus pairing, a
-lasting identity and a cancellable watch, which ggchat does not use yet. What has **not**
+the generated Swift has the shape ggchat's FFI seam specifies. ggchat dials,
+pairs and keeps a lasting identity through it; the cancellable watch is the
+one part it does not use, since it ends its waits by closing the pipe. What has **not**
 happened yet is the measurement that matters: a build on a physical iPhone,
 on a carrier network, dialling a desktop. Compiling is not running —
 `portmapper`, `igd-next`, `netdev` and `hickory-resolver` all want entitlements

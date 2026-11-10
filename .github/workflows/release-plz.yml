@@ -29,7 +29,7 @@ on:
     branches: [main]
 
 jobs:
-  # Pushes the vX.Y.Z tag when a release PR merges. A no-op on every other
+  # Pushes the build/vX.Y.Z tag when a release PR merges. A no-op on every other
   # push (release_always = false in release-plz.toml).
   release-plz-release:
     name: Release-plz release

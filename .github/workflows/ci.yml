@@ -171,8 +171,8 @@ jobs:
       #
       # Unoptimised on purpose. This job answers "does it cross-compile,
       # assemble, link and answer" — none of which optimisation changes — and
-      # five release builds of iroh with thin LTO on a runner billed at ten
-      # times the Linux rate is not a per-commit cost worth paying. It also
+      # three optimised builds of iroh, on the slowest runner there is, are
+      # not a per-commit cost worth paying. It also
       # catches strictly more: the iOS deployment-target bug was invisible in
       # release, where optimisation drops the NEON path that referenced the
       # missing symbol.
