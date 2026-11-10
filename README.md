@@ -178,7 +178,7 @@ changed, so call it every time rather than trying to be clever about when.
 
 ```bash
 make pre-commit    # everything CI checks on Linux
-make xcframework   # the five slices and the framework (macOS, needs Xcode)
+make xcframework   # the three slices and the framework (macOS, needs Xcode)
 make checksum      # zip it and print the SwiftPM checksum
 ```
 
