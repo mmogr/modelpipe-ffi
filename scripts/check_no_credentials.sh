@@ -25,16 +25,44 @@ fail=0
 #
 # Scoped to `pub fn`/`pub async fn` because a private helper taking a `key` is
 # this crate's own business; the boundary is what this protects.
+#
+# Each signature is read whole, from `fn` to the brace or semicolon that ends
+# it. rustfmt puts one parameter per line once a signature is long, so a check
+# of the `fn` line alone never saw a parameter of `mp_pair`, or of anything
+# else long enough to wrap.
+#
+# A record's fields cross the boundary too: a credential field on a record a
+# call takes is the same parameter one level down. So every `pub` field of a
+# `uniffi::Record` is read as well, except a field a call only returns, named
+# below. `MpPaired.api_key` is the key the far machine minted, handed out once
+# by `mp_pair`; no call takes an `MpPaired`.
+CREDENTIAL='(token|api_key|apikey|secret|password|credential|bearer)'
+RETURNED_ONLY='MpPaired.api_key'
 echo "==> No exported function takes a credential"
 while IFS= read -r line; do
     [[ -z "${line}" ]] && continue
     echo "  ${line}"
     fail=1
 done < <(
-    grep -rnE '^\s*pub (async )?fn [a-z_]+\(' "${SRC_DIR}" \
-        --include='*.rs' \
-        | grep -v '_tests\.rs' \
-        | grep -iE '[(,]\s*(token|api_key|apikey|secret|password|credential|bearer)\s*:' \
+    find "${SRC_DIR}" -name '*.rs' ! -name '*_tests.rs' -print0 \
+        | sort -z \
+        | xargs -0 perl -0777 -ne '
+            my ($credential, $returned) = (qr/'"${CREDENTIAL}"'/i, "'"${RETURNED_ONLY}"'");
+            while (/^[ \t]*pub (?:async )?fn (\w+)[^(]*\(([^{;]*)/mg) {
+                my ($name, $params, $at) = ($1, $2, $-[0]);
+                next unless $params =~ /(?:^|[(,\s])${credential}\s*:/;
+                my $line = 1 + (substr($_, 0, $at) =~ tr/\n//);
+                print "$ARGV:$line: fn $name takes a parameter named $1\n";
+            }
+            while (/uniffi::Record\)\]\s*pub struct (\w+)\s*\{(.*?)\n\}/sg) {
+                my ($record, $body, $at) = ($1, $2, $-[2]);
+                while ($body =~ /^[ \t]*pub ${credential}\s*:/mg) {
+                    next if "$record.$1" eq $returned;
+                    my $line = 1 + (substr($_, 0, $at + $-[0]) =~ tr/\n//);
+                    print "$ARGV:$line: record $record has a field named $1\n";
+                }
+            }
+        ' \
         || true
 )
 
