@@ -27,6 +27,11 @@ name: Release-plz
 on:
   push:
     branches: [main]
+  # For the tag check below alone. A merge whose push event never fires runs
+  # nothing on that commit, so only a schedule can notice it on a quiet repo.
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
 
 jobs:
   # Pushes the build/vX.Y.Z tag when a release PR merges. A no-op on every other
@@ -37,8 +42,9 @@ jobs:
     # A stall guard: release-plz installs from a binary and reads git; the
     # default is six hours.
     timeout-minutes: 15
-    # Forks have no business releasing, and no RELEASE_PAT to do it with.
-    if: github.repository_owner == 'mmogr'
+    # Forks have no business releasing, and no RELEASE_PAT to do it with. On a
+    # push only: the schedule and a dispatch are for the tag check.
+    if: github.repository_owner == 'mmogr' && github.event_name == 'push'
     permissions:
       # Push the tag.
       contents: write
@@ -71,7 +77,7 @@ jobs:
     # A stall guard: release-plz installs from a binary and reads git; the
     # default is six hours.
     timeout-minutes: 15
-    if: github.repository_owner == 'mmogr'
+    if: github.repository_owner == 'mmogr' && github.event_name == 'push'
     permissions:
       # Push to the PR branch.
       contents: write
@@ -96,3 +102,45 @@ jobs:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+
+  # The version on main has a build tag. Merging a release PR sets the version
+  # and the release job above tags it; if the push event for that merge never
+  # fires, nothing runs on the commit, the tag is never pushed, and nothing
+  # says so. release-plz then reads the version as already set and the
+  # changelog as up to date, so it opens no release PR either: v0.4.3 sat that
+  # way from 2026-10-02 until 2026-11-10, with every run green.
+  #
+  # After the release job, so a merge it has just tagged reads as tagged.
+  release-tagged:
+    name: The version on main is tagged
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    needs: [release-plz-release]
+    if: >-
+      !cancelled() && github.repository_owner == 'mmogr'
+      && needs.release-plz-release.result != 'failure'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Every tag, and main as it is now, not as the event saw it.
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fail if the manifest's version has no build tag
+        run: |
+          version="$(awk -F'"' '/^\[package\]/ {p = 1; next} /^\[/ {p = 0} p && /^version *=/ {print $2; exit}' Cargo.toml)"
+          if [[ -z "${version}" ]]; then
+            echo "::error::could not read the package version from Cargo.toml"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/build/v${version}" >/dev/null; then
+            echo "build/v${version} exists"
+            exit 0
+          fi
+          echo "::error::Cargo.toml on main says ${version}, and there is no build/v${version} tag: the release PR that set it merged and was never tagged, so nothing was built and release-plz will open no new release PR"
+          echo "::error::README.md, Releasing, 'If a release PR merged and no build tag appeared', says what to do"
+          exit 1

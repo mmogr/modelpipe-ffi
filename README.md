@@ -394,6 +394,20 @@ Worth knowing:
   (`git fetch origin && git tag -f build/vX.Y.Z origin/main && git push -f origin build/vX.Y.Z`).
   That releases everything on `main` under X.Y.Z's changelog, and works only
   while `Cargo.toml` on `main` still says X.Y.Z.
+- **If a release PR merged and no build tag appeared,** nothing ran on the
+  merge. GitHub dropped the push event for #42's merge on 2026-10-02, so no
+  workflow saw that commit, and release-plz tags only a commit from a release
+  PR: every later push found the version already set and the changelog up to
+  date, and opened nothing. Release-plz's "The version on main is tagged" job
+  fails on every push, and daily, while `Cargo.toml` on `main` names a
+  version with no `build/vX.Y.Z` tag. To recover, merge a change that has a
+  changelog entry (a `fix`, `feat`, `perf` or `docs` commit); release-plz then
+  opens a release PR adding it to X.Y.Z's entry, and merging that PR is a
+  commit from a release PR, so the release job tags it as it should have the
+  first time. Tagging by hand also works, at `main`'s tip and only while
+  nothing else merges
+  (`git fetch origin && git tag build/vX.Y.Z origin/main && git push origin build/vX.Y.Z`),
+  but its release then carries commits X.Y.Z's changelog does not list.
 - **If the pin landed and the release did not,** `main` carries the pin and
   `vX.Y.Z` does not exist. Do not re-run the workflow to recover. A re-run
   publishes nothing further: `verify` and the pin step refuse a version whose
