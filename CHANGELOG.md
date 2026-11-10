@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.3...build/v0.4.4) - 2026-11-10
+
+### Other
+
+- *(deps)* the lock resolves every dependency to the newest version its range allows ([#84](https://github.com/mmogr/modelpipe-ffi/pull/84))
+- *(release)* pin the v0.4.3 XCFramework checksum
+
 ## [0.4.3](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.2...build/v0.4.3) - 2026-11-10
 
 Set on 2026-10-02 by [#42](https://github.com/mmogr/modelpipe-ffi/pull/42)
