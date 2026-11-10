@@ -397,17 +397,16 @@ Worth knowing:
 - **If a release PR merged and no build tag appeared,** nothing ran on the
   merge. GitHub dropped the push event for #42's merge on 2026-10-02, so no
   workflow saw that commit, and release-plz tags only a commit from a release
-  PR: every later push found the version already set and the changelog up to
-  date, and opened nothing. Release-plz's "The version on main is tagged" job
-  fails on every push, and daily, while `Cargo.toml` on `main` names a
-  version with no `build/vX.Y.Z` tag. To recover, merge a change that has a
-  changelog entry (a `fix`, `feat`, `perf` or `docs` commit); release-plz then
-  opens a release PR adding it to X.Y.Z's entry, and merging that PR is a
-  commit from a release PR, so the release job tags it as it should have the
-  first time. Tagging by hand also works, at `main`'s tip and only while
-  nothing else merges
-  (`git fetch origin && git tag build/vX.Y.Z origin/main && git push origin build/vX.Y.Z`),
-  but its release then carries commits X.Y.Z's changelog does not list.
+  PR. Nor will it open another release PR for that version: it finds
+  `Cargo.toml` already naming it and `CHANGELOG.md` already holding its
+  section, and leaves both alone however much merges after. Release-plz's
+  "The version on main is tagged" job fails on every push, and daily, while
+  `Cargo.toml` on `main` names a version with no `build/vX.Y.Z` tag. To
+  recover, add what has merged since to X.Y.Z's CHANGELOG section by hand,
+  merge that, wait for `main`'s CI to be green, and push the build tag at
+  `main`'s tip with nothing else merging until the release run ends
+  (`git fetch origin && git tag build/vX.Y.Z origin/main && git push origin build/vX.Y.Z`).
+  The tag's commit carries X.Y.Z in its manifest, so `verify` accepts it.
 - **If the pin landed and the release did not,** `main` carries the pin and
   `vX.Y.Z` does not exist. Do not re-run the workflow to recover. A re-run
   publishes nothing further: `verify` and the pin step refuse a version whose
