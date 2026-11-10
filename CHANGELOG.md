@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.4...build/v0.4.5) - 2026-11-10
+
+### Other
+
+- *(release)* pin the v0.4.4 XCFramework checksum
+
 ## [0.4.4](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.3...build/v0.4.4) - 2026-11-10
 
 ### Other
