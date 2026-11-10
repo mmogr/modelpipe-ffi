@@ -21,8 +21,14 @@ on:
 # Cancel superseded runs on a branch, never on main: a cancelled run on main
 # is a lost integration signal, which is exactly the defect ggchat spent #44
 # fixing.
+#
+# On main each commit is a group of its own. `cancel-in-progress: false` alone
+# does not keep a run: a group holds one running and one pending run, and a
+# third push replaces the pending one, which is then cancelled with no job
+# started. Two pushes to main on 2026-10-30 lost their runs that way, so
+# cee5d19 was never checked.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Read-only across the board: nothing in CI writes to the repo, and the
