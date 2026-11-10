@@ -34,13 +34,9 @@ on:
     tags:
       - "build/v[0-9]+.[0-9]+.[0-9]+"
       - "build/v[0-9]+.[0-9]+.[0-9]+-*"
+  # Builds and checks, and creates no release: every step that pins, tags or
+  # publishes runs only on a tag push.
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Build and check, but create no release"
-        required: false
-        default: true
-        type: boolean
 
 # Read by default. Only the build job writes: it pushes the pin with
 # RELEASE_PAT and creates the release with this token. Verify runs the test
