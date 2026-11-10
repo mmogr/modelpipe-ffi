@@ -127,3 +127,11 @@ redundant_pub_crate = "allow"
 opt-level = 2
 lto = "thin"
 codegen-units = 16
+# Cargo strips debug info from a release build by default, proc macros
+# included. Xcode 27's `strip` can leave a library's string pool off an 8-byte
+# boundary, and macOS 27 then refuses to load it: a stripped proc macro is a
+# crate rustc cannot find, so `make xcframework` stopped at
+# "can't find crate for `tokio_macros`" on macOS 27.2 with Xcode 27.1. gglib
+# carries the same line for the same reason. The static libraries this ships
+# are archived rather than linked, and `strip` applies only to linked outputs.
+strip = "none"
