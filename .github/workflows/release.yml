@@ -42,8 +42,12 @@ on:
         default: true
         type: boolean
 
+# Read by default. Only the build job writes: it pushes the pin with
+# RELEASE_PAT and creates the release with this token. Verify runs the test
+# suite, every build script cargo runs included, and has no business holding
+# a token that can write to the repository while it does.
 permissions:
-  contents: write
+  contents: read
 
 # One release at a time, and none cancelled part-way. A run cancelled between
 # the push to main and the release is the one state that needs a hand to
@@ -70,6 +74,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # Nothing in this job fetches or pushes after the checkout, so the
+          # token is not left in .git/config for the tests and build scripts.
+          persist-credentials: false
 
       # A tag on a branch that never merged is a release of code nobody
       # reviewed. Cheap to check, and the check is the whole point of tagging
@@ -205,6 +212,9 @@ jobs:
     timeout-minutes: 60
     needs: [verify]
     if: needs.verify.outputs.already_released != 'true'
+    permissions:
+      # `gh release create`, with this job's token.
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
