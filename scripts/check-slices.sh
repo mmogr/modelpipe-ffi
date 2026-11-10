@@ -193,11 +193,30 @@ for slice in ios-arm64 ios-arm64-simulator macos-arm64; do
     fi
 done
 
+# A ceiling on each slice's size, when one is set: build-xcframework.sh sets
+# 100 MB for a release build. A release slice is about 60 MB. The two things
+# that have made it larger without anyone deciding to are the binding
+# generator, checked for by name above, and LLVM bitcode embedded in every
+# dependency, which `lto = false` in Cargo.toml keeps out and which Xcode
+# never reads. Either one puts a slice well past the ceiling.
+if [[ -n "${SLICE_CEILING_MB:-}" ]]; then
+    for slice in ios-arm64 ios-arm64-simulator macos-arm64; do
+        lib="${FRAMEWORK}/${slice}/libmodelpipe_ffi.a"
+        [[ -f "${lib}" ]] || continue
+        mb=$(( $(stat -f%z "${lib}") / 1048576 ))
+        if (( mb > SLICE_CEILING_MB )); then
+            echo "  WRONG    ${slice} is ${mb} MB, over the ${SLICE_CEILING_MB} MB ceiling"
+            fail=1
+        fi
+    done
+fi
+
 if [[ "${fail}" -ne 0 ]]; then
     echo
     echo "error: at least one slice is not what a release should ship." >&2
     echo "       A slice on the wrong platform fails at link time in the consuming" >&2
-    echo "       app; one carrying the generator makes every download larger." >&2
+    echo "       app; one carrying the generator or bitcode makes every download" >&2
+    echo "       larger." >&2
     exit 1
 fi
 
