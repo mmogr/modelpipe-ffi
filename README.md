@@ -434,8 +434,9 @@ Worth knowing:
 ## Status
 
 Early. The crate builds, its suite passes against real loopback sockets, and
-the generated Swift has the shape ggchat's FFI seam specifies, plus pairing, a
-lasting identity and a cancellable watch, which ggchat does not use yet. What has **not**
+the generated Swift has the shape ggchat's FFI seam specifies. ggchat dials,
+pairs and keeps a lasting identity through it; the cancellable watch is the
+one part it does not use, since it ends its waits by closing the pipe. What has **not**
 happened yet is the measurement that matters: a build on a physical iPhone,
 on a carrier network, dialling a desktop. Compiling is not running —
 `portmapper`, `igd-next`, `netdev` and `hickory-resolver` all want entitlements
