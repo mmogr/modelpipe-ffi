@@ -126,9 +126,56 @@ jobs:
       - name: Private docs
         run: cargo doc --no-deps --document-private-items
 
+  # Whether anything the Apple job builds or runs has changed. That job is the
+  # slow one, on the scarce runner, and a change to prose, to another
+  # workflow, or to how dependencies or releases are proposed cannot change
+  # what it finds. Everything not on the list below runs it, so a new file is
+  # built until someone decides otherwise.
+  #
+  # A job rather than `paths:` on the workflow: a workflow that does not run
+  # reports no CI Success, and the ruleset requires that check, so a skipped
+  # workflow is a PR that can never merge. A skipped job is a success to CI
+  # Success.
+  changes:
+    name: Changes
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      apple: ${{ steps.diff.outputs.apple }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Does the Apple job need to run
+        id: diff
+        env:
+          # A PR is diffed against its base, a push against what main was
+          # before it. The first push of a branch, or a base this checkout
+          # does not have, has nothing to diff against, and runs the job.
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -z "${BASE}" || "${BASE}" =~ ^0+$ ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "no base to diff against; the Apple job runs"
+            echo "apple=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          changed="$(git diff --name-only "${BASE}" "${GITHUB_SHA}")"
+          printf '%s\n' "${changed}"
+          if grep -qvE '^(README\.md|CHANGELOG\.md|SECURITY\.md|LICENSE|release-plz\.toml|\.github/(CODEOWNERS|PULL_REQUEST_TEMPLATE\.md|dependabot\.yml|ISSUE_TEMPLATE/.*|workflows/(release|release-plz|update-deps)\.yml))$' <<< "${changed}"; then
+            echo "apple=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "nothing the Apple job builds or runs has changed; it is skipped"
+            echo "apple=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   apple:
     name: Apple build and Swift smoke
     runs-on: macos-26
+    needs: [changes]
+    if: needs.changes.outputs.apple == 'true'
     # One failure the smoke test exists to find HANGS rather than errors: an
     # async method on a runtime whose workers never started. Without a
     # ceiling here, detecting that would mean a job running to GitHub's
@@ -191,7 +238,7 @@ jobs:
     runs-on: ubuntu-26.04
     # The single required status check. Adding a job above needs only a line
     # here — no branch-protection change.
-    needs: [fmt, clippy, test, rustdoc, apple]
+    needs: [fmt, clippy, test, rustdoc, changes, apple]
     if: always()
     steps:
       - name: Fail if anything upstream failed
