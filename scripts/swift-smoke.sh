@@ -20,8 +20,8 @@
 #   Nothing about a network. No hole punching, no NAT traversal, no relay, no
 #   phone. A GitHub runner is not a device behind carrier-grade NAT. The dial
 #   below names a machine that does not exist and is expected to sit at `idle`
-#   forever. That measurement is the on-device spike, and a green run here is
-#   not a substitute for it.
+#   forever. That measurement is ggchat on a phone, and a green run here is not
+#   a substitute for it.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -96,7 +96,7 @@ func fail(_ message: String) -> Never {
 //    the Rust type first — documented, and covered by five Rust tests — and
 //    neither crossed the boundary, because a `pub fn` on a type that crosses
 //    the FFI is not part of the FFI. Swift got a bare enum, and
-//    `error.isRetryable()` failed to compile in the spike. This check used to
+//    `error.isRetryable()` failed to compile in the first app to call it. This check used to
 //    catch the error and interpolate it, which proved the type crossed and
 //    nothing whatever about its surface.
 do {
@@ -167,7 +167,7 @@ guard pipe.closeReason() == nil else {
 
 // The rate-limited counter is the one nothing else surfaces: a relay
 // refusing this endpoint and a network silently dropping the traffic look
-// identical from the outside, and the spike's whole diagnosis rests on
+// identical from the outside, and diagnosing a pipe on a phone rests on
 // telling them apart.
 let metrics = pipe.networkMetrics()
 print("ok  metrics read: \(metrics.relayConnections) opened, "
@@ -374,7 +374,7 @@ do {
 
 // 6. A constructed MpPaired pins the memberwise initialiser's order, and the
 //    hand-written description withholds the key. A real redemption needs a
-//    far machine and is the on-device spike's job.
+//    far machine and is ggchat's job, on a phone.
 let fake = MpPaired(
     pipe: MpPipe(noHandle: MpPipe.NoHandle()),
     apiKey: "secret-key-0123",
