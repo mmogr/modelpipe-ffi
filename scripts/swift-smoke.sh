@@ -420,11 +420,13 @@ export MODELPIPE_FFI_LOCAL_XCFRAMEWORK=1
 # Not available as `timeout` on macOS without coreutils, so fall back to
 # running unbounded rather than failing a build over a missing tool — the job
 # ceiling still catches it.
+#
+# The status is taken from the command itself. Read after an `if` whose test
+# failed, `$?` is the `if`'s own status, which is zero, so a smoke test that
+# failed would exit this script successfully.
 if command -v timeout >/dev/null 2>&1; then
-    if timeout 300 swift run Smoke; then
-        exit 0
-    fi
-    status=$?
+    status=0
+    timeout 300 swift run Smoke || status=$?
     if [[ "${status}" -eq 124 ]]; then
         echo "error: the smoke executable did not finish within 300s." >&2
         echo "       Nothing here waits on a network, so this is a call that" >&2
