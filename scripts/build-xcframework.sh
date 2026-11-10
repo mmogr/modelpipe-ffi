@@ -134,15 +134,20 @@ echo "==> Generating the Swift binding and its headers"
 # straight to its destination. `Sources/Modelpipe/` holds tracked source now, so
 # a generate that fails halfway must not be able to leave it truncated or
 # missing.
+#
+# The host library and the generator are one build, with `bindgen` on: the
+# generator is behind that feature so the slices above never carry it. In the
+# profile the slices were built in, so this is the only host build; a bare
+# `cargo run` would build the whole tree once more, in dev.
 rm -rf "${STAGING_DIR}"
 mkdir -p "${STAGING_DIR}" "${SWIFT_SRC_DIR}"
-cargo build --lib --profile "${PROFILE}"
+cargo build --lib --bin uniffi-bindgen --features bindgen --profile "${PROFILE}"
 # `--no-format` because the bytes must not depend on the machine. uniffi shells
 # out to `xcrun swift-format` and only warns when every formatter is missing,
 # so this file comes out one way on a Mac and another on Linux — invisible
 # while `generated/` was ignored, and a permanently red diff gate the moment it
 # is committed. Formatting a generated file buys nothing anyway.
-cargo run --bin uniffi-bindgen -- generate \
+"target/${PROFILE_DIR}/uniffi-bindgen" generate \
     --library "target/${PROFILE_DIR}/libmodelpipe_ffi.dylib" \
     --language swift \
     --no-format \
@@ -173,6 +178,11 @@ echo "==> Checking each slice is what it claims to be"
 # the difference is the load command inside the object. A build that says
 # "succeeded" while linking a Linux or macOS object into the iOS slice would
 # fail at `import` time in Xcode, a week later, in someone else's project.
+# A release slice also has a size ceiling: see SLICE_CEILING_MB there. A dev
+# build carries debug info and is not held to it.
+if [[ "${PROFILE}" != "dev" ]]; then
+    export SLICE_CEILING_MB="${SLICE_CEILING_MB:-100}"
+fi
 "${ROOT_DIR}/scripts/check-slices.sh" "${FRAMEWORK}"
 
 echo

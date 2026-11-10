@@ -176,10 +176,47 @@ for slice in ios-arm64 ios-arm64-simulator macos-arm64; do
     fi
 done
 
+# No slice carries the binding generator. It is behind the crate's `bindgen`
+# feature so that a library built for a device never compiles it; a slice
+# built with the feature on would hold uniffi_bindgen's objects, which the app
+# never calls and every download of the framework pays for.
+for slice in ios-arm64 ios-arm64-simulator macos-arm64; do
+    lib="${FRAMEWORK}/${slice}/libmodelpipe_ffi.a"
+    [[ -f "${lib}" ]] || continue
+    # Read whole before matching: `ar t | grep -q` under pipefail is false
+    # whenever grep stops early and ar dies of the closed pipe, which is
+    # exactly when there is a match.
+    members="$(ar t "${lib}")"
+    if grep -q '^uniffi_bindgen-' <<< "${members}"; then
+        echo "  WRONG    ${slice} carries the binding generator (uniffi_bindgen)"
+        fail=1
+    fi
+done
+
+# A ceiling on each slice's size, when one is set: build-xcframework.sh sets
+# 100 MB for a release build. A release slice is about 60 MB. The two things
+# that have made it larger without anyone deciding to are the binding
+# generator, checked for by name above, and LLVM bitcode embedded in every
+# dependency, which `lto = false` in Cargo.toml keeps out and which Xcode
+# never reads. Either one puts a slice well past the ceiling.
+if [[ -n "${SLICE_CEILING_MB:-}" ]]; then
+    for slice in ios-arm64 ios-arm64-simulator macos-arm64; do
+        lib="${FRAMEWORK}/${slice}/libmodelpipe_ffi.a"
+        [[ -f "${lib}" ]] || continue
+        mb=$(( $(stat -f%z "${lib}") / 1048576 ))
+        if (( mb > SLICE_CEILING_MB )); then
+            echo "  WRONG    ${slice} is ${mb} MB, over the ${SLICE_CEILING_MB} MB ceiling"
+            fail=1
+        fi
+    done
+fi
+
 if [[ "${fail}" -ne 0 ]]; then
     echo
-    echo "error: at least one slice is not the platform it claims." >&2
-    echo "       A build that ships this fails at link time in the consuming app." >&2
+    echo "error: at least one slice is not what a release should ship." >&2
+    echo "       A slice on the wrong platform fails at link time in the consuming" >&2
+    echo "       app; one carrying the generator or bitcode makes every download" >&2
+    echo "       larger." >&2
     exit 1
 fi
 

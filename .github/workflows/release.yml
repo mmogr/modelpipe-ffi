@@ -34,16 +34,16 @@ on:
     tags:
       - "build/v[0-9]+.[0-9]+.[0-9]+"
       - "build/v[0-9]+.[0-9]+.[0-9]+-*"
+  # Builds and checks, and creates no release: every step that pins, tags or
+  # publishes runs only on a tag push.
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Build and check, but create no release"
-        required: false
-        default: true
-        type: boolean
 
+# Read by default. Only the build job writes: it pushes the pin with
+# RELEASE_PAT and creates the release with this token. Verify runs the test
+# suite, every build script cargo runs included, and has no business holding
+# a token that can write to the repository while it does.
 permissions:
-  contents: write
+  contents: read
 
 # One release at a time, and none cancelled part-way. A run cancelled between
 # the push to main and the release is the one state that needs a hand to
@@ -70,6 +70,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # Nothing in this job fetches or pushes after the checkout, so the
+          # token is not left in .git/config for the tests and build scripts.
+          persist-credentials: false
 
       # A tag on a branch that never merged is a release of code nobody
       # reviewed. Cheap to check, and the check is the whole point of tagging
@@ -205,6 +208,9 @@ jobs:
     timeout-minutes: 60
     needs: [verify]
     if: needs.verify.outputs.already_released != 'true'
+    permissions:
+      # `gh release create`, with this job's token.
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -221,6 +227,11 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Restored, never saved. A tag run can read main's caches but no
+          # later tag run can read this one's, so a save here only spends
+          # the repository's quota.
+          save-if: false
 
       # Builds every slice and asserts each one is the platform it claims.
       - name: Build
@@ -384,8 +395,12 @@ jobs:
             echo "## Consuming this release"
             echo
             echo '```swift'
-            echo ".package(url: \"https://github.com/${GITHUB_REPOSITORY}.git\", from: \"${version}\")"
+            echo ".package(url: \"https://github.com/${GITHUB_REPOSITORY}.git\", .upToNextMinor(from: \"${version}\"))"
             echo '```'
+            echo
+            echo "Up to the next minor rather than \`from:\`: below 1.0 a minor release"
+            echo "can add a protocol requirement or an error case, so taking one should"
+            echo "be a deliberate change."
             echo
             echo "Then \`import Modelpipe\`. The seven system frameworks the static"
             echo "library needs are declared on the package's own target, so there is"

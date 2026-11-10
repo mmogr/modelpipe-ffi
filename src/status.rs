@@ -3,10 +3,15 @@
 //! Each one mirrors a modelpipe type rather than re-exporting it. modelpipe
 //! marks all three `#[non_exhaustive]`, which is right for a Rust dependent
 //! that should recompile against a new variant, and impossible for a generated
-//! binding: a Swift enum is exhaustive or it is nothing. Mirroring converts
-//! "a variant appeared upstream" from a silent behaviour change into a
-//! non-exhaustive `match` that fails this crate's build — which is the moment a
-//! human should decide what the phone does about it.
+//! binding: a Swift enum is exhaustive or it is nothing. Mirroring keeps the
+//! Swift enums this crate's own, so a variant that appears upstream never
+//! reaches the app as a case it has no code for.
+//!
+//! It does not fail this crate's build. A `match` on a `#[non_exhaustive]`
+//! enum from another crate must have a wildcard arm, so a new variant compiles
+//! and lands there at run time: read as the conservative state, with one line
+//! on stderr naming it ([`tracing_unknown`]). Reading modelpipe's changelog on
+//! each bump is what catches one; the line is the backstop.
 
 use modelpipe::{CloseReason, NetworkMetrics, PipeStatus};
 
@@ -75,8 +80,8 @@ impl From<CloseReason> for MpCloseReason {
         match reason {
             CloseReason::Shutdown => Self::Shutdown,
             CloseReason::ListenerFailed => Self::ListenerFailed,
-            // Same reasoning as `MpPipeStatus`: an upstream variant becomes a
-            // build failure here, and until someone decides otherwise the
+            // Same reasoning as `MpPipeStatus`: an upstream variant lands
+            // here at run time, and until someone decides otherwise the
             // closest honest answer is that it was not a clean shutdown.
             other => {
                 tracing_unknown(&format!("{other:?}"));

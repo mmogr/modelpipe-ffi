@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help build check clean fmt fmt-check lint test doc doc-check lock-check \
-        enforce surface binding-check slices swift xcframework xcframework-fast spike \
+        enforce surface binding-check slices swift xcframework xcframework-fast \
         checksum dev \
         pre-commit ci
 
@@ -65,8 +65,8 @@ surface: swift ## Fail if the smoke test does not exercise every exported member
 	@./scripts/check-swift-surface.sh
 
 swift: ## Generate the Swift binding from the built library
-	$(CARGO) build --lib
-	$(CARGO) run --bin uniffi-bindgen -- generate \
+	$(CARGO) build --lib --bin uniffi-bindgen --features bindgen
+	target/debug/uniffi-bindgen generate \
 		--library target/debug/libmodelpipe_ffi$(shell uname -s | grep -q Darwin && echo .dylib || echo .so) \
 		--language swift --no-format --out-dir build/generated-staging
 	@cp build/generated-staging/modelpipe_ffi.swift Sources/Modelpipe/
@@ -76,16 +76,6 @@ xcframework: ## Build the XCFramework, optimised (macOS only; needs Xcode)
 
 xcframework-fast: ## Build the XCFramework unoptimised, for a quick check
 	@PROFILE=dev ./scripts/build-xcframework.sh
-
-spike: ## Build the framework, then generate and open the on-device spike app
-	@command -v xcodegen >/dev/null 2>&1 || { \
-		echo "error: xcodegen not found. brew install xcodegen"; exit 1; }
-	@$(MAKE) xcframework
-	@cd spike && xcodegen generate --quiet
-	@echo
-	@echo "Generated spike/ModelpipeSpike.xcodeproj — see spike/README.md."
-	@echo "Put the phone on CELLULAR, not wifi, or this measures your LAN."
-	@open spike/ModelpipeSpike.xcodeproj
 
 slices: ## Re-check an already-built XCFramework's slices
 	@./scripts/check-slices.sh build/ModelpipeFFI.xcframework

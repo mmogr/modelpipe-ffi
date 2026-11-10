@@ -42,8 +42,23 @@ crate-type = ["staticlib", "cdylib", "lib"]
 # The generator, run by `make swift`. UniFFI's documented shape: a bin in the
 # crate being bound, so the generated Swift is always read out of the exact
 # scaffolding this build produced rather than a separately-versioned tool.
+#
+# Behind `bindgen`, as gglib-ffi's is. Every dependency of a package is a
+# dependency of its library, so with `uniffi/cli` on the `uniffi` line the
+# generator, clap and goblin among it, was compiled into the static library
+# and shipped in every slice: 49 MB of each 243 MB archive. The linker left it
+# out of the app, but every download and every copy of the framework carried
+# it. A slice is never built with this feature; `check-slices.sh` refuses one
+# that holds the generator.
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+# The generator and what it needs: `cli` for its command line, and
+# `cargo-metadata`, uniffi's default, which library mode uses to read the
+# crate's metadata. Off for the library, which needs neither.
+bindgen = ["uniffi/cli", "uniffi/cargo-metadata"]
 
 [dependencies]
 # The crate this binds. This line is the floor of a range, not what is
@@ -59,7 +74,10 @@ modelpipe = "0.8.1"
 # Not the `tokio` feature: all it adds is async-compat, for UniFFI's
 # `async_runtime = "tokio"`, which the runtime section of `src/lib.rs`
 # rejects. Left off, that attribute does not compile.
-uniffi = { version = "0.32", features = ["cli"] }
+#
+# No default features: the one default, `cargo-metadata`, is the generator's,
+# and `bindgen` above turns it on with the rest of the generator.
+uniffi = { version = "0.32", default-features = false }
 # Multi-thread, because modelpipe's futures are all Send (its own
 # `future_promises` pins that) and the pipe should not stall on one worker.
 tokio = { version = "1", features = ["rt-multi-thread"] }
@@ -125,5 +143,22 @@ redundant_pub_crate = "allow"
 
 [profile.release]
 opt-level = 2
-lto = "thin"
+# No LTO, and the setting is load-bearing. With `lib` among the crate types,
+# cargo passes this crate no `-C lto` at all, so `lto = "thin"` optimised
+# nothing here; what it did do was compile every dependency with its LLVM
+# bitcode embedded, for an LTO step that never ran, and the static library
+# bundles those objects as they are. That was 104 MB of each 164 MB slice,
+# which Xcode, which no longer takes bitcode, never reads. Off, the machine
+# code is the same to within 2 KB and each slice is 60 MB. check-slices.sh
+# fails a release slice that grows past its ceiling, so this cannot quietly
+# return.
+lto = false
 codegen-units = 16
+# Cargo strips debug info from a release build by default, proc macros
+# included. Xcode 27's `strip` can leave a library's string pool off an 8-byte
+# boundary, and macOS 27 then refuses to load it: a stripped proc macro is a
+# crate rustc cannot find, so `make xcframework` stopped at
+# "can't find crate for `tokio_macros`" on macOS 27.2 with Xcode 27.1. gglib
+# carries the same line for the same reason. The static libraries this ships
+# are archived rather than linked, and `strip` applies only to linked outputs.
+strip = "none"

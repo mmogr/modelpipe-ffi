@@ -21,8 +21,14 @@ on:
 # Cancel superseded runs on a branch, never on main: a cancelled run on main
 # is a lost integration signal, which is exactly the defect ggchat spent #44
 # fixing.
+#
+# On main each commit is a group of its own. `cancel-in-progress: false` alone
+# does not keep a run: a group holds one running and one pending run, and a
+# third push replaces the pending one, which is then cancelled with no job
+# started. Two pushes to main on 2026-10-30 lost their runs that way, so
+# cee5d19 was never checked.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Read-only across the board: nothing in CI writes to the repo, and the
@@ -38,6 +44,8 @@ jobs:
   fmt:
     name: Format
     runs-on: ubuntu-26.04
+    # A stall guard. No toolchain work beyond rustfmt and a few greps.
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,6 +70,9 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-26.04
+    # A stall guard, not a budget: a cold cache builds the iroh tree in a
+    # few minutes, and the default is six hours.
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,6 +82,11 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Saved from main only. A PR can restore main's caches, so saving
+          # one per PR only duplicates them: #62 alone held another 1 GB of
+          # the repository's 10 GB, evicting caches main would have used.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
@@ -78,6 +94,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-26.04
+    # A stall guard, not a budget: a cold cache builds the iroh tree in a
+    # few minutes, and the default is six hours.
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,6 +106,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Lockfile guard
         run: cargo metadata --locked --format-version 1 > /dev/null
@@ -108,6 +129,9 @@ jobs:
   rustdoc:
     name: Rustdoc
     runs-on: ubuntu-26.04
+    # A stall guard, not a budget: a cold cache builds the iroh tree in a
+    # few minutes, and the default is six hours.
+    timeout-minutes: 30
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
@@ -119,6 +143,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Public docs
         run: cargo doc --no-deps
@@ -126,9 +152,56 @@ jobs:
       - name: Private docs
         run: cargo doc --no-deps --document-private-items
 
+  # Whether anything the Apple job builds or runs has changed. That job is the
+  # slow one, on the scarce runner, and a change to prose, to another
+  # workflow, or to how dependencies or releases are proposed cannot change
+  # what it finds. Everything not on the list below runs it, so a new file is
+  # built until someone decides otherwise.
+  #
+  # A job rather than `paths:` on the workflow: a workflow that does not run
+  # reports no CI Success, and the ruleset requires that check, so a skipped
+  # workflow is a PR that can never merge. A skipped job is a success to CI
+  # Success.
+  changes:
+    name: Changes
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      apple: ${{ steps.diff.outputs.apple }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Does the Apple job need to run
+        id: diff
+        env:
+          # A PR is diffed against its base, a push against what main was
+          # before it. The first push of a branch, or a base this checkout
+          # does not have, has nothing to diff against, and runs the job.
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -z "${BASE}" || "${BASE}" =~ ^0+$ ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "no base to diff against; the Apple job runs"
+            echo "apple=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          changed="$(git diff --name-only "${BASE}" "${GITHUB_SHA}")"
+          printf '%s\n' "${changed}"
+          if grep -qvE '^(README\.md|CHANGELOG\.md|SECURITY\.md|LICENSE|release-plz\.toml|\.github/(CODEOWNERS|PULL_REQUEST_TEMPLATE\.md|dependabot\.yml|ISSUE_TEMPLATE/.*|workflows/(release|release-plz|update-deps)\.yml))$' <<< "${changed}"; then
+            echo "apple=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "nothing the Apple job builds or runs has changed; it is skipped"
+            echo "apple=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   apple:
     name: Apple build and Swift smoke
     runs-on: macos-26
+    needs: [changes]
+    if: needs.changes.outputs.apple == 'true'
     # One failure the smoke test exists to find HANGS rather than errors: an
     # async method on a runtime whose workers never started. Without a
     # ceiling here, detecting that would mean a job running to GitHub's
@@ -145,6 +218,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Builds every slice, generates the Swift, assembles the framework, and
       # asserts each slice carries the platform load command and deployment
@@ -154,8 +229,8 @@ jobs:
       #
       # Unoptimised on purpose. This job answers "does it cross-compile,
       # assemble, link and answer" — none of which optimisation changes — and
-      # five release builds of iroh with thin LTO on a runner billed at ten
-      # times the Linux rate is not a per-commit cost worth paying. It also
+      # three optimised builds of iroh, on the slowest runner there is, are
+      # not a per-commit cost worth paying. It also
       # catches strictly more: the iOS deployment-target bug was invisible in
       # release, where optimisation drops the NEON path that referenced the
       # missing symbol.
@@ -181,17 +256,19 @@ jobs:
       #
       # WHAT IT DOES NOT PROVE: anything about a network. No hole punching, no
       # NAT traversal, no relay, no phone. A runner is not a device behind
-      # CGNAT. That measurement is the on-device spike, and a green run here
-      # is not a substitute for it.
+      # CGNAT. That measurement is ggchat on a phone, and a green run here is
+      # not a substitute for it.
       - name: Swift links and calls it
         run: ./scripts/swift-smoke.sh
 
   ci-success:
     name: CI Success
     runs-on: ubuntu-26.04
+    # A stall guard. It reads its needs and exits.
+    timeout-minutes: 5
     # The single required status check. Adding a job above needs only a line
     # here — no branch-protection change.
-    needs: [fmt, clippy, test, rustdoc, apple]
+    needs: [fmt, clippy, test, rustdoc, changes, apple]
     if: always()
     steps:
       - name: Fail if anything upstream failed

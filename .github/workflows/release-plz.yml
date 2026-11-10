@@ -34,11 +34,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Pushes the vX.Y.Z tag when a release PR merges. A no-op on every other
+  # Pushes the build/vX.Y.Z tag when a release PR merges. A no-op on every other
   # push (release_always = false in release-plz.toml).
   release-plz-release:
     name: Release-plz release
     runs-on: ubuntu-26.04
+    # A stall guard: release-plz installs from a binary and reads git; the
+    # default is six hours.
+    timeout-minutes: 15
     # Forks have no business releasing, and no RELEASE_PAT to do it with. On a
     # push only: the schedule and a dispatch are for the tag check.
     if: github.repository_owner == 'mmogr' && github.event_name == 'push'
@@ -71,6 +74,9 @@ jobs:
   release-plz-pr:
     name: Release-plz PR
     runs-on: ubuntu-26.04
+    # A stall guard: release-plz installs from a binary and reads git; the
+    # default is six hours.
+    timeout-minutes: 15
     if: github.repository_owner == 'mmogr' && github.event_name == 'push'
     permissions:
       # Push to the PR branch.
