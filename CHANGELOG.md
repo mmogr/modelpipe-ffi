@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.6](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.5...build/v0.4.6) - 2026-11-23
+
+### Fixed
+
+- *(apple)* a consumer links on iOS again, and the linker settings are written from rustc's own list ([#89](https://github.com/mmogr/modelpipe-ffi/pull/89))
+
+### Other
+
+- *(release)* pin the v0.4.5 XCFramework checksum
+
 ## [0.4.5](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.4...build/v0.4.5) - 2026-11-22
 
 **Does not link on iOS; do not pin it.** The lock update below took netdev to
