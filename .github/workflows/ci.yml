@@ -247,8 +247,8 @@ jobs:
       # they are testing.
       #
       # WHAT THIS PROVES: the generated Swift compiles under the same
-      # strict-concurrency settings the app uses, the static library links,
-      # every symbol resolves, and a call across the boundary returns —
+      # strict-concurrency settings the app uses, the macOS slice links with
+      # every symbol resolved, and a call across the boundary returns —
       # including the async ones. Without the library's runtime entered, the
       # first dial stops on a fatal error. With a runtime whose workers never
       # started, the first call after the dial that waits on the runtime
@@ -260,6 +260,29 @@ jobs:
       # not a substitute for it.
       - name: Swift links and calls it
         run: ./scripts/swift-smoke.sh
+
+      # The smoke test above links ONE slice of three, the Mac's, and that
+      # used to be read as "the static library links". 0.4.5 linked on a Mac
+      # and on nothing else: a lock update moved netdev to a version that
+      # calls libresolv on iOS, and this job, the release's smoke test and the
+      # release's own consumer all went green on macOS. ggchat's build was the
+      # first iOS link, a day after the release.
+      #
+      # So both iOS slices are linked here, in a consumer that declares no
+      # linker settings of its own. Nothing is run: a link needs an SDK, not
+      # a device, so no simulator is booted.
+      - name: Both iOS slices link in a consumer
+        run: ./scripts/ios-link.sh
+
+      # Last, because it rebuilds this crate for each slice with other flags
+      # and so replaces the three libraries the steps above were reading.
+      #
+      # The link above says today's list is enough. This says the list is the
+      # one rustc names, so it is never typed: a lock update that changes what
+      # a slice links fails here with the lines to commit, and a setting no
+      # slice needs any longer is dropped rather than kept for ever.
+      - name: The linker settings are the ones rustc names
+        run: make link-settings-check
 
   ci-success:
     name: CI Success

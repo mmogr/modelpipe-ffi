@@ -69,8 +69,9 @@ let package = Package(
             // only that it *references* the symbols, not where they live.
             // Omit one and everything compiles, right up to the last step:
             //
-            //     __RNvMs_...system_configuration...SCNetworkInterfaceType13from_cfstring
-            //         in libmodelpipe_ffi.a[arm64]
+            //     "_res_9_ninit", referenced from:
+            //         ...netdev..os..ios..dns..get_system_dns_conf
+            //         in libmodelpipe_ffi.a[251]
             //     ld: symbol(s) not found for architecture arm64
             //
             // `.binaryTarget` accepts no build settings, so they can only live
@@ -79,21 +80,38 @@ let package = Package(
             // them here rather than in each consumer is most of the reason
             // this is a package.
             //
-            // Read off rustc's own link invocation for the iOS target, minus
-            // the ones SwiftPM already passes (System, c, m).
+            // The list is not typed. `scripts/link-settings.sh` asks rustc
+            // what each of the three slices was declared to need
+            // (`--print native-static-libs`) and writes it between the two
+            // markers, minus the ones SwiftPM already passes (System, c, m);
+            // CI fails when the lines here are not the ones it writes. It was
+            // typed once, and 0.4.5 is what that cost: a lock update moved
+            // netdev to a version that calls libresolv on iOS, the list stood
+            // still, and the release linked on a Mac and nowhere else.
+            //
+            // A condition is on a setting only some slices need, so the other
+            // platform's linker is never handed a library it may not have.
+            //
+            // What reaches for what, as of the list below: SystemConfiguration
+            // and Network are iroh's transport, interface enumeration and
+            // reachability; resolv is netdev reading the DNS servers on iOS;
+            // Security is rustls-platform-verifier, via security-framework —
+            // the Apple trust store, which is why there is no bundled CA set;
+            // objc is objc2's runtime calls; iconv is the C dependencies'.
+            // BEGIN GENERATED LINKER SETTINGS
+            // Written by scripts/link-settings.sh from rustc's native-static-libs.
+            // Do not edit: run `make link-settings`.
             linkerSettings: [
-                // iroh's transport: interface enumeration and reachability.
-                .linkedFramework("SystemConfiguration"),
-                // rustls-platform-verifier, via security-framework — the Apple
-                // trust store, which is why there is no bundled CA set.
-                .linkedFramework("Security"),
-                .linkedFramework("Network"),
                 .linkedFramework("CoreFoundation"),
                 .linkedFramework("Foundation"),
-                // objc2's runtime calls, and iconv from the C dependencies.
-                .linkedLibrary("objc"),
+                .linkedFramework("Network", .when(platforms: [.iOS])),
+                .linkedFramework("Security"),
+                .linkedFramework("SystemConfiguration"),
                 .linkedLibrary("iconv"),
+                .linkedLibrary("objc"),
+                .linkedLibrary("resolv", .when(platforms: [.iOS])),
             ]
+            // END GENERATED LINKER SETTINGS
         ),
     ],
     // The consuming app compiles this under Swift 6 with complete strict

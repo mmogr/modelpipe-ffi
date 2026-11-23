@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 .PHONY: help build check clean fmt fmt-check lint test doc doc-check lock-check \
         enforce surface binding-check slices swift xcframework xcframework-fast \
-        checksum dev \
+        link-settings link-settings-check ios-link checksum dev \
         pre-commit ci
 
 # Resolve cargo through rustup's shim explicitly, so a standalone toolchain
@@ -79,6 +79,25 @@ xcframework-fast: ## Build the XCFramework unoptimised, for a quick check
 
 slices: ## Re-check an already-built XCFramework's slices
 	@./scripts/check-slices.sh build/ModelpipeFFI.xcframework
+
+link-settings: ## Write Package.swift's linker settings from what rustc says each slice links (macOS only)
+	@CARGO="$(CARGO)" ./scripts/link-settings.sh
+
+link-settings-check: link-settings ## Fail if the committed linker settings are not what rustc names
+	@git diff --exit-code -- Package.swift && \
+		echo "link-settings: the committed list is what the three slices link" || { \
+		echo ""; \
+		echo "error: Package.swift's linker settings are not what rustc says the"; \
+		echo "       slices link. A static library does not carry its own"; \
+		echo "       dependencies, so a consumer's linker finds the library's system"; \
+		echo "       symbols through that list and nothing else: one missing line is"; \
+		echo "       'Undefined symbols' in somebody's app, as 0.4.5 was on iOS."; \
+		echo "       A dependency has started or stopped linking something. Commit"; \
+		echo "       the diff above, which \`make link-settings\` writes on a Mac."; \
+		exit 1; }
+
+ios-link: ## Link both iOS slices of the built XCFramework in a consumer (macOS only)
+	@./scripts/ios-link.sh
 
 checksum: ## Zip the XCFramework and print its SwiftPM checksum
 	@cd build && zip -qry ModelpipeFFI.xcframework.zip ModelpipeFFI.xcframework

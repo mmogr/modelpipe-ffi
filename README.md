@@ -181,6 +181,8 @@ changed, so call it every time rather than trying to be clever about when.
 ```bash
 make pre-commit    # everything CI checks on Linux
 make xcframework   # the three slices and the framework (macOS, needs Xcode)
+make ios-link      # link both iOS slices of that framework in a consumer
+make link-settings # write Package.swift's linker settings from rustc's own list
 make checksum      # zip it and print the SwiftPM checksum
 ```
 
@@ -226,9 +228,9 @@ to an error a consumer switches over, as 0.4.0 did to `MpPairError`. Each
 feature is a minor release, so `.upToNextMinor` takes every fix and makes
 taking a feature a deliberate change. ggchat pins this way.
 
-Then `import Modelpipe`. That is the whole of it — **the seven system
-frameworks the static library needs ship with the package**, declared on its
-own target, so a consumer declares none.
+Then `import Modelpipe`. That is the whole of it — **the system frameworks
+and libraries the static library needs ship with the package**, declared on
+its own target, so a consumer declares none.
 
 That is most of why this is a package rather than a pair of release assets.
 A static library does not carry its own dependencies: when rustc links a
@@ -244,13 +246,26 @@ ld: symbol(s) not found for architecture arm64
 
 `.binaryTarget` accepts no build settings at all, so those settings can only
 live on a source target — and the one that knows which frameworks iroh's
-transitive dependencies reach for is this repository's, not yours. The list is
-read off rustc's own link invocation for the iOS target, minus the ones SwiftPM
-already passes (`System`, `c`, `m`).
+transitive dependencies reach for is this repository's, not yours.
 
-`scripts/swift-smoke.sh` builds against **this package**, not a copy of it, on
-every CI run — so the snippet above is executed rather than merely written
-down, and so is the claim that the linker settings reach you.
+**The list is generated, not typed.** `scripts/link-settings.sh` asks rustc
+what each of the three slices was declared to need (`--print
+native-static-libs`) and writes the answer into `Package.swift`, minus the ones
+SwiftPM already passes (`System`, `c`, `m`), with a platform condition on
+anything only the iOS slices or only the macOS slice needs. CI regenerates it
+and fails on a difference, so a dependency update that changes what a slice
+links arrives as a red PR naming the lines to commit (`make link-settings`, on
+a Mac). It was typed once: 0.4.5 took a netdev that calls libresolv on iOS, the
+list did not move, and that release links on a Mac and not on an iPhone or a
+simulator. **Do not pin 0.4.5.**
+
+**Every slice is linked, on every CI run and before every release.**
+`scripts/swift-smoke.sh` builds against **this package**, not a copy of it,
+for macOS, and calls into it — so the snippet above is executed rather than
+merely written down. `scripts/ios-link.sh` links the same package for an
+iPhone and for the simulator in a consumer that declares no linker settings.
+Nothing is run on iOS; what that proves is that the settings reach you and are
+enough, for each of the three slices rather than for the Mac's alone.
 
 ### Pin a tag, never a branch
 
@@ -307,7 +322,8 @@ commits since the last tag. Merging that PR *is* the decision to release.
 
 What it pushes is **`build/vX.Y.Z`**, and that is not the release tag. It is a
 build trigger. `release.yml` picks it up, builds the XCFramework optimised,
-runs the Swift smoke test against the artifact it is about to publish, writes
+runs the Swift smoke test against the artifact it is about to publish and
+links its two iOS slices in a consumer, writes
 that artifact's checksum into `Package.swift` on `main`, and only then creates
 the public **`vX.Y.Z`** tag on that commit.
 
@@ -331,8 +347,9 @@ published, builds it, checks that the tag resolved to the pin, and runs it.
 That step meets the release as a consumer does: the tag resolves to the pin,
 so its manifest names the zip just uploaded; the download matches the
 checksum; the binding compiles against it; the linker settings the package
-declares are enough to link a consumer that declares none; and the library
-answers a call. The call adds UniFFI's own check: `mpReadPairing` is the first
+declares are enough to link a macOS consumer that declares none; and the
+library answers a call. It links for a Mac only: the iOS slices of the same
+build were linked before the pin, under the same linker settings. The call adds UniFFI's own check: `mpReadPairing` is the first
 call into the library, which is where UniFFI compares the binding's API
 checksums with the library's and calls `fatalError` when they differ, so a
 pair that links but disagrees on a checksum fails here, where a gate that only

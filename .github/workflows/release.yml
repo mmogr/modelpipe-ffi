@@ -238,9 +238,19 @@ jobs:
         run: make xcframework
 
       # Proves the artifact about to be released actually links and answers,
-      # rather than merely having been produced.
+      # rather than merely having been produced. On macOS: one slice of three.
       - name: Swift links and calls it
         run: ./scripts/swift-smoke.sh
+
+      # The other two. v0.4.5 passed the step above and the consumer gate at
+      # the end of this job, both of which link for macOS, and did not link
+      # for iOS at all (scripts/ios-link.sh has the account). This links the
+      # device and simulator slices of the very framework that is about to be
+      # zipped, with the linker settings of the manifest at this commit, so a
+      # release that cannot be linked into an iPhone app stops here, before
+      # anything is pinned or published.
+      - name: Both iOS slices link in a consumer
+        run: ./scripts/ios-link.sh
 
       - name: Zip and checksum
         id: package
@@ -447,7 +457,10 @@ jobs:
       # run pushed, so its manifest names the zip just uploaded and this run's
       # checksum; the download matches that checksum; the binding compiles
       # against it; the linker settings the package declares are enough to link
-      # a consumer that declares none; and the library answers a call.
+      # a macOS consumer that declares none; and the library answers a call.
+      # A Mac is the only platform this links for. The two iOS slices of this
+      # same build were linked before the pin, by "Both iOS slices link in a
+      # consumer", under the linker settings this manifest carries unchanged.
       # `swift build` resolves the package first, which is what checks the
       # downloaded zip against that checksum, and writes the revision it
       # resolved to Package.resolved; an executable is what forces a final

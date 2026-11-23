@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.5](https://github.com/mmogr/modelpipe-ffi/compare/build/v0.4.4...build/v0.4.5) - 2026-11-22
 
+**Does not link on iOS; do not pin it.** The lock update below took netdev to
+0.47.0, which calls libresolv on iOS, and `Package.swift` did not list
+`resolv`, so an iPhone or simulator build stops at `Undefined symbols:
+_res_9_ninit`. It links on a Mac, which is all any check here linked for. The
+next release lists it, and from then on the list is written from rustc's own
+and both iOS slices are linked before a release is published.
+
 ### Other
 
 - *(deps)* the lock resolves every dependency to the newest version its range allows ([#87](https://github.com/mmogr/modelpipe-ffi/pull/87))
