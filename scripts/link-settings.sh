@@ -65,11 +65,25 @@ die() {
 # also say `-weak_framework`, or pass a path, and a form this does not know
 # how to write as a SwiftPM setting must not be dropped on the floor: that is
 # a missing link setting with a green check beside it.
+#
+# A name is letters, digits, and `_ . + -`, or it fails too. The first run of
+# this on a CI runner read `-lm` as a library called `m` followed by an escape
+# sequence: CARGO_TERM_COLOR was `always` there, cargo closed the note with a
+# colour reset, and the name that came out was not the `m` on the list of
+# what SwiftPM already links. It was written into the manifest as a setting.
+plain_name() {
+    if [[ ! "$1" =~ ^[A-Za-z0-9_.+-]+$ ]]; then
+        echo "error: rustc named something that is not a plain library or framework name: '$1' in '$2'" >&2
+        return 1
+    fi
+}
+
 parse_libs() {
     local line="$1" expecting_framework=0 token name already skip out=""
     # Unquoted on purpose: word splitting is the parse.
     for token in ${line}; do
         if [[ "${expecting_framework}" -eq 1 ]]; then
+            plain_name "${token}" "${line}" || return 1
             out+="framework ${token}"$'\n'
             expecting_framework=0
             continue
@@ -80,6 +94,7 @@ parse_libs() {
                 ;;
             -l?*)
                 name="${token#-l}"
+                plain_name "${name}" "${line}" || return 1
                 skip=0
                 for already in ${ALREADY_LINKED}; do
                     [[ "${name}" == "${already}" ]] && skip=1
@@ -159,6 +174,10 @@ ${INDENT}${END_MARK}"
     if (parse_libs "-lobjc -weak_framework CoreNFC" >/dev/null 2>&1); then
         die "self-test: an argument it cannot write was let through"
     fi
+    # And so must a name carrying a terminal's colour reset.
+    if (parse_libs "-lobjc -lm"$'\033[0m' >/dev/null 2>&1); then
+        die "self-test: a name with an escape sequence in it was let through"
+    fi
 }
 
 self_test
@@ -196,13 +215,16 @@ CARGO="${CARGO:-cargo}"
 # the only one rustc prints the note for; without it cargo would also link the
 # cdylib for a platform nothing loads it on.
 #
+# `--color never` because the note is read, not shown: with colour on, cargo
+# ends the line with an escape sequence, which lands in the last name.
+#
 # No answer is a failure, never an empty list. cargo exiting zero while this
 # reads nothing would otherwise write a manifest with no linker settings and
 # call it generated.
 native_libs() {
     local triple="$1" out line
     # shellcheck disable=SC2086  # CARGO may be `rustup run <toolchain> cargo`
-    if ! out="$(${CARGO} rustc --locked --lib --profile "${PROFILE}" --target "${triple}" \
+    if ! out="$(${CARGO} rustc --color never --locked --lib --profile "${PROFILE}" --target "${triple}" \
         --crate-type staticlib -- --print native-static-libs 2>&1)"; then
         printf '%s\n' "${out}" >&2
         die "the build for ${triple} failed"
